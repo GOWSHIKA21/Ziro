@@ -9,10 +9,25 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from .database import Base
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(64), primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=False, default="")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    learning_requests = relationship("LearningRequest", back_populates="user", cascade="all, delete-orphan")
+
+
 class LearningRequest(Base):
     __tablename__ = "learning_requests"
 
     id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=True, index=True)
     goal = Column(String(255), nullable=False)
     starting_level = Column(String(32), default="Beginner")  # Beginner, Intermediate, Advanced
     weekly_hours = Column(Float, nullable=False)
@@ -29,12 +44,14 @@ class LearningRequest(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     # Relationships
+    user = relationship("User", back_populates="learning_requests")
     modules = relationship("LearningModule", back_populates="learning_request", cascade="all, delete-orphan", order_by="LearningModule.order_index")
     weekly_plans = relationship("WeeklyPlan", back_populates="learning_request", cascade="all, delete-orphan", order_by="WeeklyPlan.week_number")
     resources = relationship("Resource", back_populates="learning_request", cascade="all, delete-orphan")
     proposed_actions = relationship("ProposedAction", back_populates="learning_request", cascade="all, delete-orphan")
     study_sessions = relationship("StudySession", back_populates="learning_request", cascade="all, delete-orphan")
     agent_logs = relationship("AgentLog", back_populates="learning_request", cascade="all, delete-orphan", order_by="AgentLog.timestamp")
+    adaptive_revisions = relationship("AdaptiveRevision", back_populates="learning_request", cascade="all, delete-orphan", order_by="AdaptiveRevision.timestamp.desc()")
 
 
 class LearningModule(Base):
@@ -154,6 +171,11 @@ class StudySession(Base):
     calendar_event_id = Column(String(128), nullable=True)
     is_user_created = Column(Boolean, default=False)
     idempotency_hash = Column(String(128), unique=True, index=True, nullable=False)
+    
+    # Progress & Study logging
+    actual_minutes_studied = Column(Integer, default=0)
+    completed_at = Column(DateTime, nullable=True)
+    study_notes = Column(Text, nullable=True)
 
     learning_request = relationship("LearningRequest", back_populates="study_sessions")
     weekly_plan = relationship("WeeklyPlan", back_populates="study_sessions")
@@ -186,3 +208,17 @@ class TestRun(Base):
     verification_evidence = Column(JSON, default=dict)
     execution_duration_ms = Column(Float, default=0.0)
     created_at = Column(DateTime, default=utc_now)
+
+
+class AdaptiveRevision(Base):
+    __tablename__ = "adaptive_revisions"
+
+    id = Column(String(64), primary_key=True, index=True)
+    learning_request_id = Column(String(64), ForeignKey("learning_requests.id"), nullable=False)
+    revision_type = Column(String(64), nullable=False)  # missed_sessions, availability_change, pace_adjustment
+    previous_state = Column(JSON, default=dict)
+    adjusted_state = Column(JSON, default=dict)
+    reasoning = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=utc_now)
+
+    learning_request = relationship("LearningRequest", back_populates="adaptive_revisions")

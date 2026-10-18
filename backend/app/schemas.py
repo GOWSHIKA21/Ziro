@@ -2,6 +2,53 @@ import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
+# ----------------- Auth Schemas -----------------
+
+class UserRegisterRequest(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., min_length=8, description="Password (min 8 characters)")
+    full_name: str = Field(default="", max_length=255, description="Full name or display name")
+
+    @field_validator("email")
+    def validate_email(cls, v):
+        cleaned = v.strip().lower()
+        if "@" not in cleaned or "." not in cleaned.split("@")[-1]:
+            raise ValueError("Invalid email format.")
+        return cleaned
+
+    @field_validator("password")
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long.")
+        return v
+
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., description="User password")
+
+    @field_validator("email")
+    def validate_email(cls, v):
+        return v.strip().lower()
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    is_active: bool
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
 # ----------------- Request Schemas -----------------
 
 class LearningRequestCreate(BaseModel):
@@ -127,9 +174,19 @@ class StudySessionSchema(BaseModel):
     is_user_created: bool
     idempotency_hash: str
     google_calendar_url: Optional[str] = None
+    actual_minutes_studied: int = 0
+    completed_at: Optional[datetime.datetime] = None
+    study_notes: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class StudySessionProgressUpdate(BaseModel):
+    is_completed: bool = True
+    actual_minutes_studied: Optional[int] = Field(default=None, ge=0)
+    study_notes: Optional[str] = Field(default=None, max_length=1000)
+
 
 
 class WeeklyPlanSchema(BaseModel):
@@ -198,8 +255,38 @@ class AgentLogSchema(BaseModel):
         from_attributes = True
 
 
+class AdaptiveRevisionSchema(BaseModel):
+    id: str
+    learning_request_id: str
+    revision_type: str
+    previous_state: Dict[str, Any] = {}
+    adjusted_state: Dict[str, Any] = {}
+    reasoning: str
+    timestamp: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdaptivePlanRequest(BaseModel):
+    new_weekly_hours: Optional[float] = Field(default=None, gt=0, le=80, description="Updated available weekly study hours")
+    missed_strategy: str = Field(default="rebalance", description="'rebalance' (redistribute over remaining weeks) or 'extend' (add extra weeks)")
+    pace_adjustment: Optional[float] = Field(default=1.0, ge=0.5, le=2.0, description="Pace multiplier (e.g. 0.8 for slower, 1.2 for faster)")
+
+
+class AdaptivePlanResponse(BaseModel):
+    revision_id: str
+    learning_request_id: str
+    message: str
+    previous_hours: float
+    new_hours: float
+    adjusted_weeks_count: int
+    reasoning: str
+
+
 class LearningRequestResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     goal: str
     starting_level: str
     weekly_hours: float
@@ -218,6 +305,7 @@ class LearningRequestResponse(BaseModel):
     proposed_actions: List[ProposedActionSchema] = []
     study_sessions: List[StudySessionSchema] = []
     agent_logs: List[AgentLogSchema] = []
+    adaptive_revisions: List[AdaptiveRevisionSchema] = []
 
     class Config:
         from_attributes = True

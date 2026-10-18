@@ -1,7 +1,6 @@
-import React from 'react';
 import {
   Clock, Calendar, BookOpen, ShieldCheck, CheckCircle2,
-  AlertCircle, ArrowRight, Sparkles, RefreshCw, FileText, Check, Download
+  AlertCircle, ArrowRight, Sparkles, RefreshCw, FileText, Check, Download, Zap, GitFork
 } from 'lucide-react';
 import { getRoadmapMarkdownDownloadUrl } from '../api';
 
@@ -9,6 +8,7 @@ export default function DashboardTab({
   learningPath,
   onNavigateTab,
   onRefresh,
+  onOpenAdaptiveModal,
   isRefreshing
 }) {
   if (!learningPath) {
@@ -82,6 +82,23 @@ export default function DashboardTab({
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>Export (.md)</span>
             </a>
+
+            <button
+              onClick={onOpenAdaptiveModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors shadow-2xs"
+              title="Rebalance schedule, adjust weekly hours, or catch up on missed sessions"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-600" />
+              <span>Adaptive Recovery</span>
+            </button>
+
+            <button
+              onClick={() => onNavigateTab('skill_graph')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-colors shadow-2xs"
+            >
+              <GitFork className="w-3.5 h-3.5 text-purple-600" />
+              <span>Skill Graph</span>
+            </button>
 
             <button
               onClick={onRefresh}

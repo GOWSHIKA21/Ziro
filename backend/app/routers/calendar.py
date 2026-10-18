@@ -14,8 +14,8 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import StudySession, LearningRequest
-from ..schemas import StudySessionSchema
+from ..models import StudySession, LearningRequest, utc_now
+from ..schemas import StudySessionSchema, StudySessionProgressUpdate
 
 router = APIRouter(prefix="/api/calendar", tags=["Calendar"])
 
@@ -125,13 +125,39 @@ def export_icalendar(
 
 
 @router.post("/sessions/{id}/toggle-complete", response_model=StudySessionSchema)
-def toggle_session_complete(id: str, db: Session = Depends(get_db)):
-    """Toggles session status between 'synced_calendar' and 'completed' for interactive progress tracking."""
+def toggle_session_complete(
+    id: str,
+    payload: Optional[StudySessionProgressUpdate] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Toggles session status between 'synced_calendar' and 'completed'
+    and optionally logs actual study minutes, notes, and timestamp.
+    """
     session = db.query(StudySession).filter(StudySession.id == id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    session.status = "completed" if session.status != "completed" else "synced_calendar"
+    if payload:
+        session.status = "completed" if payload.is_completed else "synced_calendar"
+        if payload.actual_minutes_studied is not None:
+            session.actual_minutes_studied = payload.actual_minutes_studied
+        if payload.study_notes is not None:
+            session.study_notes = payload.study_notes
+        if payload.is_completed:
+            session.completed_at = utc_now()
+        else:
+            session.completed_at = None
+    else:
+        if session.status != "completed":
+            session.status = "completed"
+            session.completed_at = utc_now()
+            if not session.actual_minutes_studied:
+                session.actual_minutes_studied = int(session.duration_hours * 60)
+        else:
+            session.status = "synced_calendar"
+            session.completed_at = None
+
     db.commit()
     db.refresh(session)
     return attach_google_url(session)

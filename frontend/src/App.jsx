@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard, CalendarRange, BookOpenCheck, Activity,
-  ShieldAlert, Calendar, FlaskConical, Sparkles, AlertCircle
+  ShieldAlert, Calendar, FlaskConical, Sparkles, AlertCircle,
+  GitFork, Zap, User
 } from 'lucide-react';
 
 import Navbar from './components/Navbar';
 import InputFormModal from './components/InputFormModal';
+import AuthModal from './components/AuthModal';
+import AdaptiveRecoveryModal from './components/AdaptiveRecoveryModal';
 import DashboardTab from './components/DashboardTab';
 import LearningPathTab from './components/LearningPathTab';
+import SkillGraphTab from './components/SkillGraphTab';
 import ResourceLibraryTab from './components/ResourceLibraryTab';
 import AgentActivityTab from './components/AgentActivityTab';
 import ApprovalCenterTab from './components/ApprovalCenterTab';
@@ -18,6 +22,7 @@ import {
   fetchLearningPaths,
   getLearningPath,
   createLearningPath,
+  deleteLearningPath,
   verifyResources,
   replaceResource,
   approveAction,
@@ -28,7 +33,9 @@ import {
   createCustomSession,
   deleteCalendarSession,
   executeTestRuns,
-  fetchTestRuns
+  fetchTestRuns,
+  getMe,
+  logoutUser
 } from './api';
 
 export default function App() {
@@ -37,8 +44,13 @@ export default function App() {
   const [activePath, setActivePath] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   
+  // User Authentication State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
   // Modal & Loading States
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAdaptiveModalOpen, setIsAdaptiveModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -62,6 +74,10 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
+      // Check current user profile
+      const user = await getMe().catch(() => null);
+      setCurrentUser(user);
+
       const paths = await fetchLearningPaths();
       setLearningPaths(paths);
 
@@ -150,6 +166,20 @@ export default function App() {
     }
   };
 
+  // Handle Auth
+  const handleAuthSuccess = async (user) => {
+    setCurrentUser(user);
+    showToast(`Welcome back, ${user.full_name || user.email}!`);
+    await loadInitialData();
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setCurrentUser(null);
+    showToast('Signed out successfully.');
+    await loadInitialData();
+  };
+
   // Verify Resources
   const handleVerifyResources = async (options = {}) => {
     if (!activePathId) return;
@@ -221,12 +251,12 @@ export default function App() {
   };
 
   // Toggle Session Complete
-  const handleToggleSessionComplete = async (sessionId) => {
+  const handleToggleSessionComplete = async (sessionId, payload = null) => {
     try {
-      await toggleSessionComplete(sessionId);
+      await toggleSessionComplete(sessionId, payload);
       const updated = await getLearningPath(activePathId);
       setActivePath(updated);
-      showToast('Study session status updated.');
+      showToast('Study session progress updated.');
     } catch (err) {
       console.error(err);
       showToast('Failed to update session status', 'error');
@@ -277,11 +307,17 @@ export default function App() {
     }
   };
 
+  // Handle Adaptive Recovery Success
+  const handleAdaptSuccess = (updated) => {
+    setActivePath(updated);
+    showToast('Plan adapted: study schedule rebalanced successfully!');
+  };
+
   // Execute Tests
   const handleExecuteTests = async (scenarioId = 'ALL') => {
     setIsExecutingTests(true);
     try {
-      const runs = await executeTestRuns(scenarioId);
+      await executeTestRuns(scenarioId);
       const allRuns = await fetchTestRuns();
       setTestRuns(allRuns);
       showToast(`Executed test scenario: ${scenarioId}. All assertions recorded.`);
@@ -301,6 +337,7 @@ export default function App() {
   const TABS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'learning_path', label: 'Learning Path', icon: CalendarRange },
+    { id: 'skill_graph', label: 'Skill Graph', icon: GitFork },
     { id: 'resource_library', label: 'Resource Library', icon: BookOpenCheck },
     { id: 'agent_activity', label: 'Agent Activity', icon: Activity },
     {
@@ -319,9 +356,12 @@ export default function App() {
       <Navbar
         learningPaths={learningPaths}
         activePath={activePath}
+        currentUser={currentUser}
         onSelectPath={selectPath}
         onOpenNewModal={() => setIsModalOpen(true)}
         onQuickStart={handleQuickStart}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Container */}
@@ -360,12 +400,17 @@ export default function App() {
             learningPath={activePath}
             onNavigateTab={setActiveTab}
             onRefresh={handleRefreshCurrentPath}
+            onOpenAdaptiveModal={() => setIsAdaptiveModalOpen(true)}
             isRefreshing={isLoading}
           />
         )}
 
         {activeTab === 'learning_path' && (
           <LearningPathTab learningPath={activePath} />
+        )}
+
+        {activeTab === 'skill_graph' && (
+          <SkillGraphTab learningPath={activePath} />
         )}
 
         {activeTab === 'resource_library' && (
@@ -416,6 +461,21 @@ export default function App() {
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleCreateCustom}
         isLoading={isLoading}
+      />
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
+      {/* Adaptive Recovery Modal */}
+      <AdaptiveRecoveryModal
+        isOpen={isAdaptiveModalOpen}
+        onClose={() => setIsAdaptiveModalOpen(false)}
+        learningPath={activePath}
+        onAdaptSuccess={handleAdaptSuccess}
       />
 
       {/* Toast Notification */}

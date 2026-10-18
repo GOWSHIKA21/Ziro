@@ -9,6 +9,9 @@ import uuid
 import datetime
 import httpx
 from bs4 import BeautifulSoup
+import ipaddress
+import urllib.parse
+import socket
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from ..models import LearningRequest, Resource, VerificationEvidence, AgentLog, utc_now
@@ -22,6 +25,38 @@ class ResourceVerifier:
             "billed annually", "buy course", "course price", "pay in full", "payment plan",
             "upgrade to certificate", "7-day trial", "$39/mo", "$49/mo"
         ]
+
+    @staticmethod
+    def is_safe_url(url: str) -> Tuple[bool, str]:
+        """
+        Validates URL to protect against SSRF (Server-Side Request Forgery).
+        Blocks loopback (127.0.0.1, localhost), private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16),
+        link-local / cloud metadata (169.254.169.254), and non-http/https schemes.
+        """
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ["http", "https"]:
+                return False, f"Unsupported URL scheme: {parsed.scheme}"
+
+            hostname = parsed.hostname
+            if not hostname:
+                return False, "Missing hostname in URL"
+
+            hostname_lower = hostname.lower()
+            if hostname_lower in ["localhost", "127.0.0.1", "::1", "metadata.google.internal"]:
+                return False, "Access to localhost and cloud metadata internal hostnames is prohibited."
+
+            try:
+                ip_str = socket.gethostbyname(hostname)
+                ip_obj = ipaddress.ip_address(ip_str)
+                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+                    return False, f"Access to private/internal IP address ({ip_str}) is blocked by SSRF protection."
+            except Exception:
+                pass
+
+            return True, ""
+        except Exception as e:
+            return False, f"URL validation error: {str(e)}"
 
     async def verify_all_resources(
         self,
@@ -98,6 +133,35 @@ class ResourceVerifier:
 
     async def _live_or_cached_check(self, db: Session, resource: Resource) -> Dict[str, Any]:
         """Performs live HTTP inspection using httpx and BeautifulSoup."""
+        # SSRF Security check
+        is_safe, ssrf_error = self.is_safe_url(resource.original_url)
+        if not is_safe:
+            status = "check_failed"
+            evidence = f"Security filter blocked URL (SSRF Prevention): {ssrf_error}"
+            resource.free_status = "unverified"
+            resource.verification_status = "failed"
+            resource.verification_notes = evidence
+
+            ev_record = VerificationEvidence(
+                id=f"ev_{uuid.uuid4().hex[:12]}",
+                resource_id=resource.id,
+                check_timestamp=utc_now(),
+                http_status=None,
+                pricing_indicators={"ssrf_blocked": True},
+                evidence_text=evidence,
+                verification_type="security_filter",
+                result_status=status
+            )
+            db.add(ev_record)
+            return {
+                "resource_id": resource.id,
+                "title": resource.title,
+                "result_status": status,
+                "http_status": None,
+                "evidence_text": evidence,
+                "verification_type": "security_filter"
+            }
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 FreeLearningAgent/1.0"
         }

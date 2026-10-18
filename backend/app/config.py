@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     CORS_ORIGINS: str = "*"
     
+    # Security & Authentication
+    JWT_SECRET: str = "ziro-free-learning-path-builder-jwt-secret-key-2026"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    
     # LLM Settings
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None

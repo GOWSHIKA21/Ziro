@@ -10,20 +10,23 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import LearningRequest, Resource, ProposedAction, StudySession
+from ..models import LearningRequest, Resource, ProposedAction, StudySession, User, AdaptiveRevision, AgentLog, utc_now
 from ..schemas import (
     LearningRequestCreate, LearningRequestResponse,
-    ResourceSchema, ProposedActionSchema, StudySessionSchema
+    ResourceSchema, ProposedActionSchema, StudySessionSchema,
+    AdaptivePlanRequest
 )
 from ..services.agent_orchestrator import agent_orchestrator
 from ..services.verifier import verifier
 from ..services.calendar_service import calendar_service
+from ..services.auth_service import get_current_user_optional
 
 router = APIRouter(prefix="/api/learning-paths", tags=["Learning Paths"])
 
 @router.post("", response_model=LearningRequestResponse, status_code=201)
 async def create_learning_path(
     payload: LearningRequestCreate,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -51,6 +54,7 @@ async def create_learning_path(
 
     learning_request = LearningRequest(
         id=req_id,
+        user_id=current_user.id if current_user else None,
         goal=payload.goal.strip(),
         starting_level=payload.starting_level,
         weekly_hours=float(payload.weekly_hours),
@@ -73,17 +77,32 @@ async def create_learning_path(
 
 
 @router.get("", response_model=List[LearningRequestResponse])
-def list_learning_paths(db: Session = Depends(get_db)):
-    """Retrieve all learning paths ordered by creation date."""
+def list_learning_paths(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """Retrieve learning paths, isolating to current user if authenticated or showing all if guest/demo."""
+    if current_user:
+        return db.query(LearningRequest).filter(
+            (LearningRequest.user_id == current_user.id) | (LearningRequest.user_id == None)
+        ).order_by(LearningRequest.created_at.desc()).all()
     return db.query(LearningRequest).order_by(LearningRequest.created_at.desc()).all()
 
 
 @router.get("/{id}", response_model=LearningRequestResponse)
-def get_learning_path(id: str, db: Session = Depends(get_db)):
-    """Retrieve current state of a specific learning path."""
+def get_learning_path(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """Retrieve current state of a specific learning path with security isolation."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail=f"Learning path with ID '{id}' not found.")
+    
+    # User isolation check
+    if req.user_id and current_user and req.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this learning path.")
     return req
 
 
@@ -247,4 +266,105 @@ def export_markdown_endpoint(id: str, db: Session = Depends(get_db)):
         media_type="text/markdown",
         headers={"Content-Disposition": f"attachment; filename=\"roadmap_{req.id}.md\""}
     )
+
+
+@router.post("/{id}/adapt", response_model=LearningRequestResponse)
+async def adapt_learning_plan(
+    id: str,
+    payload: AdaptivePlanRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Adaptive Recovery Engine:
+    Recalculates study load, redistributes remaining topics across future weeks,
+    preserves completed sessions, and adjusts for missed sessions or revised weekly hours.
+    """
+    req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    if req.user_id and current_user and req.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this learning path.")
+
+    # 1. Inspect completion status
+    completed_sessions = [s for s in req.study_sessions if s.status == "completed" or (s.actual_minutes_studied and s.actual_minutes_studied > 0)]
+    completed_hours = sum(s.duration_hours for s in completed_sessions)
+    old_weekly_hours = req.weekly_hours
+    new_weekly_hours = payload.new_weekly_hours or req.weekly_hours
+
+    # 2. Update weekly availability if changed
+    req.weekly_hours = new_weekly_hours
+    remaining_hours = max(0.0, req.total_available_hours - completed_hours)
+
+    # 3. Calculate adjusted weeks
+    if new_weekly_hours > 0:
+        remaining_weeks_needed = max(1, int(round(remaining_hours / new_weekly_hours)))
+    else:
+        remaining_weeks_needed = 4
+
+    reasoning = (
+        f"Adaptive Recovery applied: {len(completed_sessions)} sessions completed ({completed_hours:.1f}h). "
+        f"Remaining load ({remaining_hours:.1f}h) redistributed over {remaining_weeks_needed} remaining weeks "
+        f"at {new_weekly_hours:.1f}h/week using '{payload.missed_strategy}' strategy."
+    )
+
+    # 4. Save AdaptiveRevision audit record
+    rev_id = f"rev_{uuid.uuid4().hex[:10]}"
+    revision = AdaptiveRevision(
+        id=rev_id,
+        learning_request_id=req.id,
+        revision_type=payload.missed_strategy,
+        previous_state={
+            "weekly_hours": old_weekly_hours,
+            "completed_sessions_count": len(completed_sessions),
+            "completed_hours": completed_hours
+        },
+        adjusted_state={
+            "weekly_hours": new_weekly_hours,
+            "remaining_hours": remaining_hours,
+            "remaining_weeks_needed": remaining_weeks_needed
+        },
+        reasoning=reasoning,
+        timestamp=utc_now()
+    )
+    db.add(revision)
+
+    # 5. Add agent log
+    agent_log = AgentLog(
+        id=f"log_{uuid.uuid4().hex[:12]}",
+        learning_request_id=req.id,
+        stage="Adaptive Replanning",
+        status="completed",
+        message=f"Plan adapted: {reasoning}",
+        details={
+            "revision_id": rev_id,
+            "strategy": payload.missed_strategy,
+            "new_weekly_hours": new_weekly_hours,
+            "remaining_weeks_needed": remaining_weeks_needed
+        },
+        timestamp=utc_now()
+    )
+    db.add(agent_log)
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+@router.delete("/{id}")
+def delete_learning_path(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """Delete a learning path with user authorization check."""
+    req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Learning path not found.")
+    if req.user_id and current_user and req.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this learning path.")
+    db.delete(req)
+    db.commit()
+    return {"message": f"Learning path {id} deleted successfully."}
+
 

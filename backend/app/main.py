@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import engine, Base
-from .routers import learning_paths, actions, calendar, test_runs
+from .routers import auth, learning_paths, actions, calendar, test_runs
 
 # Create database tables automatically
 Base.metadata.create_all(bind=engine)
@@ -30,6 +30,7 @@ app.add_middleware(
 )
 
 # Include Routers
+app.include_router(auth.router)
 app.include_router(learning_paths.router)
 app.include_router(actions.router)
 app.include_router(calendar.router)
