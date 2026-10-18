@@ -20,7 +20,4 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
-      - key: GOOGLE_CALENDAR_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CALENDAR_CLIENT_SECRET
-        sync: false
+      - fromGroup: free-learning-path-builder-secrets
