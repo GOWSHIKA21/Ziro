@@ -1,0 +1,15 @@
+{
+  "name": "ziro-free-learning-path-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Autonomous AI Agent: Free Learning Path Builder",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "frontend:dev": "cd frontend && npm run dev",
+    "backend:start": "python run_backend.py",
+    "test": "pytest backend/tests -v"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

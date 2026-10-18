@@ -7,9 +7,10 @@ from typing import Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
-    ENV: str = "development"
+    ENV: str = "production"
     PORT: int = 8000
-    HOST: str = "127.0.0.1"
+    HOST: str = "0.0.0.0"
+    CORS_ORIGINS: str = "*"
     
     # LLM Settings
     GEMINI_API_KEY: Optional[str] = None

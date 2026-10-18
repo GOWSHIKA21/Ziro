@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: free-learning-path-builder
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt && cd frontend && npm install && npm run build
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: NODE_VERSION
+        value: 20.12.0
+      - key: LLM_PROVIDER
+        value: deterministic
+      - key: CORS_ORIGINS
+        value: "*"
