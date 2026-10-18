@@ -5,11 +5,13 @@ FastAPI Application Entry Point for Free Learning Path Builder
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
-from .database import engine, Base
+from .database import engine, Base, ensure_schema_migrations
 from .routers import auth, learning_paths, actions, calendar, test_runs
 
-# Create database tables automatically
+# Create database tables automatically & run schema migrations
 Base.metadata.create_all(bind=engine)
+ensure_schema_migrations()
+
 
 app = FastAPI(
     title="Free Learning Path Builder API",

@@ -28,3 +28,36 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_schema_migrations():
+    """
+    Ensures newly added columns exist in the database without requiring external migration tools.
+    Supports SQLite and PostgreSQL gracefully.
+    """
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            # Check users table columns
+            if "sqlite" in str(engine.url):
+                res = conn.execute(text("PRAGMA table_info(users)")).fetchall()
+                existing_cols = {row[1] for row in res}
+                cols_to_add = [
+                    ("google_id", "TEXT"),
+                    ("avatar_url", "TEXT"),
+                    ("auth_provider", "TEXT DEFAULT 'email'"),
+                    ("google_calendar_refresh_token", "TEXT"),
+                    ("google_calendar_access_token", "TEXT"),
+                    ("google_calendar_token_expiry", "TIMESTAMP"),
+                    ("google_calendar_email", "TEXT"),
+                    ("google_calendar_connected_at", "TIMESTAMP"),
+                    ("google_calendar_scope", "TEXT"),
+                ]
+                for col_name, col_type in cols_to_add:
+                    if col_name not in existing_cols:
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+    except Exception as e:
+        # Ignore if tables do not exist yet (create_all will create them)
+        pass
+

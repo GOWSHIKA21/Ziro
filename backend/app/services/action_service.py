@@ -28,14 +28,19 @@ class ActionService:
         # 1. Propose Course Enrollment Actions for active (non-replaced) verified resources
         active_resources = [r for r in learning_request.resources if r.free_status in ["verified_free", "possibly_free"]]
         
+        seen_keys = set(existing_actions.keys())
         for res in active_resources:
-            key_raw = f"{learning_request.id}:enroll:{res.original_url}"
+            key_raw = f"{learning_request.id}:enroll:{res.id}:{res.original_url}"
             idempotency_key = hashlib.sha256(key_raw.encode()).hexdigest()[:32]
 
             # If already proposed, retain existing state and decision!
-            if idempotency_key in existing_actions:
-                proposed.append(existing_actions[idempotency_key])
+            if idempotency_key in seen_keys:
+                if idempotency_key in existing_actions:
+                    proposed.append(existing_actions[idempotency_key])
                 continue
+
+            seen_keys.add(idempotency_key)
+
 
             requires_account = "Free account registration required on provider site" if res.account_required else "No account required; immediate public access"
 
@@ -253,6 +258,27 @@ class ActionService:
                 continue
 
             session_id = f"sess_{learning_request_id}_w{week_num}_{i+1}"
+            end_time_str = "21:00" if duration_per_sess == 2.5 else "20:30"
+            cal_evt_id = f"cal_evt_{sess_hash[:12]}"
+
+            # If user has connected Google Calendar, push directly to their live calendar!
+            from .google_calendar_service import google_calendar_oauth
+            user = action.learning_request.user if action.learning_request else None
+            google_access_token = google_calendar_oauth.get_valid_access_token(db, user) if user else None
+            if google_access_token:
+                try:
+                    g_evt = google_calendar_oauth.insert_calendar_event(
+                        access_token=google_access_token,
+                        title=f"Study Session: Week {week_num} Focus (Part {i+1})",
+                        start_datetime_iso=f"{date_str}T18:30:00Z",
+                        end_datetime_iso=f"{date_str}T{end_time_str}:00Z",
+                        description=f"Automated study block scheduled by Free Learning Path Builder."
+                    )
+                    if g_evt.get("id"):
+                        cal_evt_id = g_evt["id"]
+                except Exception as ge:
+                    logger.warning(f"Could not push to Google Calendar during action approval: {ge}")
+
             session = StudySession(
                 id=session_id,
                 learning_request_id=learning_request_id,
@@ -260,14 +286,15 @@ class ActionService:
                 title=f"Study Session: Week {week_num} Focus (Part {i+1})",
                 scheduled_date=date_str,
                 start_time="18:30",
-                end_time="21:00" if duration_per_sess == 2.5 else "20:30",
+                end_time=end_time_str,
                 duration_hours=duration_per_sess,
                 status="synced_calendar",
-                calendar_event_id=f"cal_evt_{sess_hash[:12]}",
+                calendar_event_id=cal_evt_id,
                 is_user_created=False,
                 idempotency_hash=sess_hash
             )
             db.add(session)
+
         db.flush()
 
 action_service = ActionService()

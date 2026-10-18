@@ -438,6 +438,8 @@ export default function App() {
         {activeTab === 'calendar' && (
           <CalendarTab
             learningPath={activePath}
+            currentUser={currentUser}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
             onSyncCalendar={handleSyncCalendar}
             onCreateCustomSession={handleCreateCustomSession}
             onDeleteSession={handleDeleteSession}

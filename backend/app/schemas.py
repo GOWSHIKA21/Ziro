@@ -61,7 +61,23 @@ class GoogleConfigResponse(BaseModel):
     is_configured: bool = False
 
 
+class GoogleCalendarStatusResponse(BaseModel):
+    is_connected: bool
+    calendar_email: Optional[str] = None
+    connected_at: Optional[datetime.datetime] = None
+    client_id_configured: bool = False
+    scope: Optional[str] = None
+
+
+class GoogleCalendarAuthUrlResponse(BaseModel):
+    auth_url: str
+    state: str
+    redirect_uri: str
+    scope: str
+
+
 # ----------------- Request Schemas -----------------
+
 
 class LearningRequestCreate(BaseModel):
     goal: str = Field(..., min_length=3, max_length=255, description="Learning goal or target job role")

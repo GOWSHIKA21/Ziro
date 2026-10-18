@@ -23,7 +23,16 @@ class User(Base):
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
+    # Google Calendar OAuth 2.0 Credentials & State
+    google_calendar_refresh_token = Column(Text, nullable=True)
+    google_calendar_access_token = Column(Text, nullable=True)
+    google_calendar_token_expiry = Column(DateTime, nullable=True)
+    google_calendar_email = Column(String(255), nullable=True)
+    google_calendar_connected_at = Column(DateTime, nullable=True)
+    google_calendar_scope = Column(String(255), nullable=True)
+
     learning_requests = relationship("LearningRequest", back_populates="user", cascade="all, delete-orphan")
+
 
 
 class LearningRequest(Base):

@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Calendar as CalendarIcon, Clock, Plus, RefreshCw, CheckCircle2,
-  ShieldCheck, AlertCircle, Trash2, User, Sparkles, Download, ExternalLink
+  ShieldCheck, AlertCircle, Trash2, User, Sparkles, Download, ExternalLink,
+  Check, LogOut, Link2
 } from 'lucide-react';
-import { getCalendarIcsDownloadUrl } from '../api';
+import {
+  getCalendarIcsDownloadUrl,
+  getCalendarOAuthStatus,
+  getCalendarAuthorizeUrl,
+  disconnectGoogleCalendar,
+  getAuthToken
+} from '../api';
 
 export default function CalendarTab({
   learningPath,
+  currentUser,
+  onOpenAuthModal,
   onSyncCalendar,
   onCreateCustomSession,
   onDeleteSession,
@@ -19,6 +28,93 @@ export default function CalendarTab({
   const [customStartTime, setCustomStartTime] = useState('19:00');
   const [customEndTime, setCustomEndTime] = useState('21:00');
   const [syncFeedback, setSyncFeedback] = useState(null);
+
+  // Google Calendar OAuth state
+  const [oauthStatus, setOauthStatus] = useState({ is_connected: false, calendar_email: null, client_id_configured: false });
+  const [isOauthLoading, setIsOauthLoading] = useState(false);
+  const [oauthMessage, setOauthMessage] = useState(null);
+
+  // Fetch calendar connection status and handle OAuth callback query params
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadStatus() {
+      try {
+        const st = await getCalendarOAuthStatus();
+        if (isMounted) setOauthStatus(st);
+      } catch (err) {
+        console.warn('Failed to fetch calendar OAuth status', err);
+      }
+    }
+    loadStatus();
+
+    // Check query params for OAuth result
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('calendar_connected') === 'true') {
+      setOauthMessage({
+        type: 'success',
+        text: 'Google Calendar connected successfully! Your study sessions can now sync live to your Google Calendar.'
+      });
+      params.delete('calendar_connected');
+      const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+      window.history.replaceState({}, '', newUrl);
+      loadStatus();
+    } else if (params.get('calendar_error')) {
+      setOauthMessage({
+        type: 'error',
+        text: `Google Calendar connection error: ${decodeURIComponent(params.get('calendar_error'))}`
+      });
+      params.delete('calendar_error');
+      const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+      window.history.replaceState({}, '', newUrl);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
+  const handleConnectGoogleCalendar = async () => {
+    if (!getAuthToken() && !currentUser) {
+      if (onOpenAuthModal) onOpenAuthModal();
+      return;
+    }
+    setIsOauthLoading(true);
+    setOauthMessage(null);
+    try {
+      const res = await getCalendarAuthorizeUrl(window.location.href);
+      if (res.auth_url) {
+        window.location.href = res.auth_url;
+      }
+    } catch (err) {
+      setOauthMessage({
+        type: 'error',
+        text: err.message || 'Failed to initiate Google Calendar connection.'
+      });
+      setIsOauthLoading(false);
+    }
+  };
+
+  const handleDisconnectGoogleCalendar = async () => {
+    setIsOauthLoading(true);
+    setOauthMessage(null);
+    try {
+      await disconnectGoogleCalendar();
+      setOauthStatus(prev => ({ ...prev, is_connected: false, calendar_email: null }));
+      setOauthMessage({
+        type: 'info',
+        text: 'Google Calendar disconnected. The system will use the persistent mock calendar and RFC 5545 export.'
+      });
+    } catch (err) {
+      setOauthMessage({
+        type: 'error',
+        text: err.message || 'Failed to disconnect Google Calendar.'
+      });
+    } finally {
+      setIsOauthLoading(false);
+    }
+  };
+
 
   if (!learningPath) return null;
   const { study_sessions = [], id: pathId, weekly_hours } = learningPath;
@@ -102,7 +198,100 @@ export default function CalendarTab({
         </div>
       </div>
 
+      {/* Google Calendar OAuth Connection Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs transition-all">
+        {oauthMessage && (
+          <div className={`mb-4 p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 animate-in fade-in ${
+            oauthMessage.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : oauthMessage.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-800'
+              : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}>
+            <div className="flex items-center gap-2">
+              {oauthMessage.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{oauthMessage.text}</span>
+            </div>
+            <button
+              onClick={() => setOauthMessage(null)}
+              className="text-slate-400 hover:text-slate-600 font-bold px-1"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs">
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-sm text-slate-900">Google Calendar OAuth 2.0</span>
+                {oauthStatus.is_connected ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Connected ({oauthStatus.calendar_email || 'Primary Calendar'})
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                    Mock / Disconnected
+                  </span>
+                )}
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded-md border border-slate-200">
+                  Scope: calendar.events
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {oauthStatus.is_connected
+                  ? 'Your study blocks sync directly to your personal Google Calendar with automatic reminder notifications.'
+                  : 'Connect your personal Google Calendar to sync study blocks live, or continue using the local mock calendar with RFC 5545 .ics export.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+            {oauthStatus.is_connected ? (
+              <button
+                type="button"
+                onClick={handleDisconnectGoogleCalendar}
+                disabled={isOauthLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors disabled:opacity-50"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>{isOauthLoading ? 'Disconnecting...' : 'Disconnect Calendar'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectGoogleCalendar}
+                disabled={isOauthLoading}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-2xs transition-colors disabled:opacity-50"
+              >
+                {isOauthLoading ? (
+                  <span className="w-3.5 h-3.5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                )}
+                <span>Connect Google Calendar</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Progress Bar when sessions exist */}
+
       {study_sessions.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3">

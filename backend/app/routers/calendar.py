@@ -11,13 +11,21 @@ import datetime
 import urllib.parse
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import StudySession, LearningRequest, utc_now
-from ..schemas import StudySessionSchema, StudySessionProgressUpdate
+from ..models import StudySession, LearningRequest, User, utc_now
+from ..schemas import (
+    StudySessionSchema, StudySessionProgressUpdate,
+    GoogleCalendarStatusResponse, GoogleCalendarAuthUrlResponse
+)
+from ..services.auth_service import get_current_user, get_current_user_optional
+from ..services.google_calendar_service import google_calendar_oauth
+from ..config import settings
 
 router = APIRouter(prefix="/api/calendar", tags=["Calendar"])
+
 
 class UserSessionCreate(BaseModel):
     learning_request_id: str
@@ -211,3 +219,120 @@ def delete_session(id: str, db: Session = Depends(get_db)):
     db.delete(session)
     db.commit()
     return {"deleted": True, "id": id}
+
+
+# ----------------- Google Calendar OAuth 2.0 Endpoints -----------------
+
+@router.get("/oauth/status", response_model=GoogleCalendarStatusResponse)
+def get_calendar_oauth_status(
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Returns the Google Calendar OAuth connection status for the authenticated user.
+    """
+    client_configured = google_calendar_oauth.is_configured()
+    if not current_user:
+        return {
+            "is_connected": False,
+            "calendar_email": None,
+            "connected_at": None,
+            "client_id_configured": client_configured,
+            "scope": None
+        }
+
+    is_connected = bool(current_user.google_calendar_refresh_token)
+    return {
+        "is_connected": is_connected,
+        "calendar_email": current_user.google_calendar_email,
+        "connected_at": current_user.google_calendar_connected_at,
+        "client_id_configured": client_configured,
+        "scope": current_user.google_calendar_scope
+    }
+
+
+@router.get("/oauth/authorize", response_model=GoogleCalendarAuthUrlResponse)
+def authorize_google_calendar(
+    redirect_to: Optional[str] = Query(None, description="Frontend page to return to upon OAuth completion"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Generates the Google OAuth 2.0 authorization URL:
+    - Requests minimal 'calendar.events' scope (avoids full calendar management)
+    - Uses offline access ('access_type=offline') and 'prompt=consent' to ensure refresh_token generation
+    - Generates a signed CSRF state parameter bound to current_user.id
+    - Enforces the exact registered callback URI
+    """
+    auth_data = google_calendar_oauth.generate_authorization_url(
+        user_id=current_user.id,
+        redirect_to=redirect_to
+    )
+    return auth_data
+
+
+@router.get("/oauth/callback")
+def google_calendar_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    OAuth 2.0 Callback handler:
+    1. Validates the state parameter against CSRF attacks.
+    2. Exchanges authorization code securely for tokens.
+    3. Fetches the connected Google user account email.
+    4. Persists the refresh token (strictly preserving any existing refresh token if Google does not return a new one).
+    5. Redirects back to the frontend with confirmation parameter.
+    """
+    if error:
+        target = f"{settings.FRONTEND_URL}/?calendar_error={urllib.parse.quote(error)}"
+        return RedirectResponse(url=target, status_code=303)
+
+    if not code or not state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required code or state parameter."
+        )
+
+    # 1. Cryptographically validate state token
+    state_payload = google_calendar_oauth.verify_oauth_state(state)
+    user_id = state_payload.get("sub")
+    redirect_to = state_payload.get("redirect_to") or settings.FRONTEND_URL
+
+    # 2. Look up the initiating user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User associated with this OAuth session was not found."
+        )
+
+    # 3. Securely exchange code for tokens
+    token_data = google_calendar_oauth.exchange_code_for_tokens(code)
+    access_token = token_data.get("access_token")
+
+    # 4. Fetch associated Google account email for display
+    google_email = None
+    if access_token:
+        google_email = google_calendar_oauth.fetch_google_account_email(access_token)
+
+    # 5. Persist tokens (preserving existing refresh token if none returned)
+    google_calendar_oauth.save_user_tokens(db, user, token_data, google_email=google_email)
+
+    # 6. Redirect to frontend with success flag
+    delimiter = "&" if "?" in redirect_to else "?"
+    final_redirect = f"{redirect_to}{delimiter}calendar_connected=true"
+    return RedirectResponse(url=final_redirect, status_code=303)
+
+
+@router.post("/oauth/disconnect")
+def disconnect_google_calendar(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Disconnects the user's Google Calendar:
+    Revokes the token at Google and removes all credentials from the persistent database.
+    """
+    return google_calendar_oauth.disconnect_calendar(db, current_user)
+

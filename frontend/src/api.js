@@ -273,6 +273,45 @@ export async function deleteCalendarSession(sessionId) {
   return res.json();
 }
 
+// ----------------- Google Calendar OAuth -----------------
+
+export async function getCalendarOAuthStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/calendar/oauth/status`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) return { is_connected: false, client_id_configured: false };
+    return await res.json();
+  } catch {
+    return { is_connected: false, client_id_configured: false };
+  }
+}
+
+export async function getCalendarAuthorizeUrl(redirectTo) {
+  const query = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
+  const res = await fetch(`${API_BASE}/calendar/oauth/authorize${query}`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to generate calendar authorization URL');
+  }
+  return await res.json();
+}
+
+export async function disconnectGoogleCalendar() {
+  const res = await fetch(`${API_BASE}/calendar/oauth/disconnect`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to disconnect Google Calendar');
+  }
+  return await res.json();
+}
+
+
 // ----------------- Official Test Runs -----------------
 
 export async function executeTestRuns(scenarioId = 'ALL') {

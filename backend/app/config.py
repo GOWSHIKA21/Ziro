@@ -30,7 +30,23 @@ class Settings(BaseSettings):
     GOOGLE_CALENDAR_CLIENT_ID: Optional[str] = None
     GOOGLE_CALENDAR_CLIENT_SECRET: Optional[str] = None
     GOOGLE_CALENDAR_REFRESH_TOKEN: Optional[str] = None
-    
+    GOOGLE_CALENDAR_REDIRECT_URI: Optional[str] = None
+    FRONTEND_URL: str = "http://localhost:5173"
+    BACKEND_BASE_URL: str = "http://localhost:8000"
+
+    def get_calendar_client_id(self) -> Optional[str]:
+        return self.GOOGLE_CALENDAR_CLIENT_ID or self.GOOGLE_OAUTH_CLIENT_ID
+
+    def get_calendar_client_secret(self) -> Optional[str]:
+        return self.GOOGLE_CALENDAR_CLIENT_SECRET or self.GOOGLE_OAUTH_CLIENT_SECRET
+
+    def get_calendar_redirect_uri(self) -> str:
+        if self.GOOGLE_CALENDAR_REDIRECT_URI:
+            return self.GOOGLE_CALENDAR_REDIRECT_URI
+        # Default to registered callback on backend
+        base = self.BACKEND_BASE_URL.rstrip("/")
+        return f"{base}/api/calendar/oauth/callback"
+
     # Database
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/learning_paths.db"
 
@@ -39,3 +55,4 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
