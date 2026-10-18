@@ -20,7 +20,19 @@ export default function ApprovalCenterTab({
   const [editTime, setEditTime] = useState('');
   const [editDuration, setEditDuration] = useState(2.5);
 
-  if (!learningPath) return null;
+  if (!learningPath) {
+    return (
+      <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 p-8 shadow-xs">
+        <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">No Learning Path Selected</h3>
+        <p className="text-slate-500 text-sm max-w-md mx-auto mt-1">
+          Select or create a learning path to review proposed external actions, enrollments, and calendar blocks.
+        </p>
+      </div>
+    );
+  }
   const { proposed_actions = [] } = learningPath;
 
   const filteredActions = proposed_actions.filter(a => {

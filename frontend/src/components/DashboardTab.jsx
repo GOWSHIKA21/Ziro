@@ -1,11 +1,16 @@
 import {
   Clock, Calendar, BookOpen, ShieldCheck, CheckCircle2,
-  AlertCircle, ArrowRight, Sparkles, RefreshCw, FileText, Check, Download, Zap, GitFork
+  AlertCircle, ArrowRight, Sparkles, RefreshCw, FileText, Check, Download, Zap, GitFork,
+  PlusCircle, Play
 } from 'lucide-react';
 import { getRoadmapMarkdownDownloadUrl } from '../api';
 
 export default function DashboardTab({
   learningPath,
+  learningPaths = [],
+  onSelectPath,
+  onOpenNewModal,
+  onQuickStart,
   onNavigateTab,
   onRefresh,
   onOpenAdaptiveModal,
@@ -13,12 +18,159 @@ export default function DashboardTab({
 }) {
   if (!learningPath) {
     return (
-      <div className="text-center py-20 bg-white rounded-2xl border border-slate-200 p-8 shadow-xs">
-        <Sparkles className="w-12 h-12 text-blue-500 mx-auto mb-3 opacity-60" />
-        <h3 className="text-lg font-semibold text-slate-800">No Learning Path Active</h3>
-        <p className="text-slate-500 text-sm max-w-md mx-auto mt-1 mb-4">
-          Click "Quick Start (6mo/5h)" or "New Goal" above to build your first AI-curated, verified roadmap.
-        </p>
+      <div className="space-y-8 animate-fadeIn">
+        {/* Welcome Hero Card */}
+        <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-10 shadow-xs relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-96 h-96 bg-gradient-to-bl from-blue-50 via-indigo-50 to-transparent opacity-70 pointer-events-none rounded-full blur-2xl -mr-20 -mt-20" />
+
+          <div className="relative z-10 max-w-3xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold mb-4 border border-blue-200">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>AI-Powered Autonomous Curriculum Generator</span>
+            </div>
+
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+              What do you want to learn today?
+            </h1>
+
+            <p className="text-slate-600 text-sm sm:text-base mt-3 leading-relaxed">
+              Design a customized, prerequisite-verified roadmap curated strictly with 100% free courses, documentation, and tutorials. The agent balances your weekly study budget, tests URLs for paywalls, and coordinates study calendar blocks with human-in-the-loop approval.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-6">
+              <button
+                onClick={onOpenNewModal}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-500/20 transition-all text-sm sm:text-base cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Create New Learning Goal</span>
+              </button>
+
+              <button
+                onClick={onQuickStart}
+                disabled={isRefreshing}
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold border border-slate-200 shadow-2xs transition-all text-sm cursor-pointer disabled:opacity-50"
+                title="Run standard benchmark: Data Analyst in 6 months with 5h/week"
+              >
+                <Play className="w-3.5 h-3.5 fill-blue-600 text-blue-600" />
+                <span>Explore Benchmark: Data Analyst (6mo @ 5h/wk)</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mt-3 flex items-center gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Zero paywalls guaranteed • Prerequisite DAG ordering • Human approval controls</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Existing Saved Learning Paths (if any exist) */}
+        {learningPaths && learningPaths.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-blue-600" />
+                  <span>Resume a Saved Learning Path</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Click any roadmap to continue your study sessions and track progress
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {learningPaths.length} Saved {learningPaths.length === 1 ? 'Path' : 'Paths'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {learningPaths.map((p) => {
+                const totalHours = p.total_available_hours || (p.duration_weeks * p.weekly_hours);
+                const moduleCount = p.modules?.length || 0;
+                const resourceCount = p.resources?.length || 0;
+
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => onSelectPath && onSelectPath(p.id)}
+                    className="group bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="bg-blue-50 text-blue-700 text-xs px-2.5 py-0.5 rounded-full font-semibold border border-blue-100">
+                          {p.starting_level || 'Beginner'} Level
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${
+                          p.feasibility_status === 'feasible'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                          {p.feasibility_status === 'feasible' ? 'Feasible' : 'Tight Timeline'}
+                        </span>
+                      </div>
+
+                      <h3 className="font-bold text-slate-900 text-base group-hover:text-blue-600 transition-colors line-clamp-1 mb-1">
+                        {p.goal}
+                      </h3>
+
+                      <p className="text-xs text-slate-500 mb-3">
+                        {p.duration_weeks} weeks @ {p.weekly_hours}h/wk ({totalHours}h allocated)
+                      </p>
+
+                      <div className="flex items-center gap-3 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-1">
+                          <GitFork className="w-3.5 h-3.5 text-blue-500" />
+                          <span>{moduleCount} modules</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>{resourceCount} free resources</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-blue-600">
+                      <span>Open Roadmap</span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Feature Highlights Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-sm text-slate-900 mb-1">100% Free & Verified</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Every course, article, and video is probed for paywalls or dead links. Any restricted content is automatically replaced with vetted free alternatives.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3">
+              <GitFork className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-sm text-slate-900 mb-1">Prerequisite-Aware DAG</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Skills are strictly ordered by dependency milestones so foundational concepts are fully mastered before diving into advanced projects.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-3">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-sm text-slate-900 mb-1">Human-in-the-Loop Actions</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              The agent proposes study sessions, calendar events, and course enrollments. You inspect, edit, approve, or reject before any external sync occurs.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

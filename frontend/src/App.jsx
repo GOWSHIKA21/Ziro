@@ -37,6 +37,12 @@ import {
   getMe,
   logoutUser
 } from './api';
+import {
+  resolveInitialActivePathId,
+  getSavedActivePathId,
+  persistActivePathId,
+  clearSavedActivePathId
+} from './pathSelection';
 
 export default function App() {
   const [learningPaths, setLearningPaths] = useState([]);
@@ -84,12 +90,26 @@ export default function App() {
       const runs = await fetchTestRuns().catch(() => []);
       setTestRuns(runs);
 
-      if (paths.length > 0) {
-        setActivePathId(paths[0].id);
-        setActivePath(paths[0]);
+      // Check saved selection from storage
+      const savedId = getSavedActivePathId();
+      const resolution = resolveInitialActivePathId(paths, savedId);
+
+      if (resolution.shouldCleanStorage) {
+        clearSavedActivePathId();
+      }
+
+      if (resolution.activeId) {
+        setActivePathId(resolution.activeId);
+        try {
+          const fullPath = await getLearningPath(resolution.activeId);
+          setActivePath(fullPath);
+        } catch {
+          const fallback = paths.find((p) => p.id === resolution.activeId);
+          setActivePath(fallback || null);
+        }
       } else {
-        // Automatically run Quick Start benchmark for instant great experience!
-        await handleQuickStart();
+        setActivePathId(null);
+        setActivePath(null);
       }
     } catch (err) {
       console.error('Failed to load initial data:', err);
@@ -98,8 +118,15 @@ export default function App() {
 
   // Load specific path when activePathId changes
   const selectPath = async (id) => {
+    if (!id) {
+      setActivePathId(null);
+      setActivePath(null);
+      clearSavedActivePathId();
+      return;
+    }
     try {
       setActivePathId(id);
+      persistActivePathId(window.localStorage, id);
       const pathData = await getLearningPath(id);
       setActivePath(pathData);
     } catch (err) {
@@ -138,6 +165,7 @@ export default function App() {
       setLearningPaths(paths);
       setActivePathId(newPath.id);
       setActivePath(newPath);
+      persistActivePathId(window.localStorage, newPath.id);
       showToast('Data Analyst Benchmark Path generated (130h across 26 weeks)!');
     } catch (err) {
       console.error(err);
@@ -156,6 +184,7 @@ export default function App() {
       setLearningPaths(paths);
       setActivePathId(created.id);
       setActivePath(created);
+      persistActivePathId(window.localStorage, created.id);
       setIsModalOpen(false);
       showToast(`Created learning path: ${created.goal}`);
     } catch (err) {
@@ -176,6 +205,9 @@ export default function App() {
   const handleLogout = async () => {
     await logoutUser();
     setCurrentUser(null);
+    clearSavedActivePathId();
+    setActivePathId(null);
+    setActivePath(null);
     showToast('Signed out successfully.');
     await loadInitialData();
   };
@@ -398,6 +430,10 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <DashboardTab
             learningPath={activePath}
+            learningPaths={learningPaths}
+            onSelectPath={selectPath}
+            onOpenNewModal={() => setIsModalOpen(true)}
+            onQuickStart={handleQuickStart}
             onNavigateTab={setActiveTab}
             onRefresh={handleRefreshCurrentPath}
             onOpenAdaptiveModal={() => setIsAdaptiveModalOpen(true)}

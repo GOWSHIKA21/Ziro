@@ -116,7 +116,19 @@ export default function CalendarTab({
   };
 
 
-  if (!learningPath) return null;
+  if (!learningPath) {
+    return (
+      <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 p-8 shadow-xs">
+        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <CalendarIcon className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">No Learning Path Selected</h3>
+        <p className="text-slate-500 text-sm max-w-md mx-auto mt-1">
+          Select or create a learning path to schedule study sessions, sync with Google Calendar, or export RFC 5545 .ics files.
+        </p>
+      </div>
+    );
+  }
   const { study_sessions = [], id: pathId, weekly_hours } = learningPath;
 
   const completedCount = study_sessions.filter(s => s.status === 'completed').length;

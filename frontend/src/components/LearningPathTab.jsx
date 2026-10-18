@@ -7,7 +7,19 @@ import {
 export default function LearningPathTab({ learningPath }) {
   const [selectedMonth, setSelectedMonth] = useState('all');
 
-  if (!learningPath) return null;
+  if (!learningPath) {
+    return (
+      <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 p-8 shadow-xs">
+        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <Calendar className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">No Learning Path Selected</h3>
+        <p className="text-slate-500 text-sm max-w-md mx-auto mt-1">
+          Select an existing roadmap from the top dropdown or create a new learning goal to view its week-by-week curriculum.
+        </p>
+      </div>
+    );
+  }
 
   const {
     goal,

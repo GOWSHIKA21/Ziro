@@ -38,10 +38,21 @@ export default function Navbar({
             <div className="hidden lg:flex items-center gap-2">
               <span className="text-xs font-medium text-slate-500">Active Path:</span>
               <select
+                aria-label="Active Path Selector"
                 className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 font-medium text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 max-w-xs truncate"
                 value={activePath?.id || ''}
                 onChange={(e) => onSelectPath(e.target.value)}
               >
+                {!activePath && (
+                  <option value="" disabled>
+                    -- Select a Learning Path --
+                  </option>
+                )}
+                {activePath && (
+                  <option value="">
+                    ← Overview / Welcome View
+                  </option>
+                )}
                 {learningPaths.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.goal} ({p.duration_weeks}w @ {p.weekly_hours}h/wk)
