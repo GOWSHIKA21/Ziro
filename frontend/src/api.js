@@ -75,6 +75,31 @@ export async function logoutUser() {
   return true;
 }
 
+export async function getGoogleOAuthConfig() {
+  try {
+    const res = await fetch(`${API_BASE}/auth/google/config`);
+    if (!res.ok) return { client_id: '', is_configured: false };
+    return await res.json();
+  } catch {
+    return { client_id: '', is_configured: false };
+  }
+}
+
+export async function loginWithGoogle(credential) {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential })
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Google authentication failed');
+  }
+  const data = await res.json();
+  if (data.access_token) setAuthToken(data.access_token);
+  return data;
+}
+
 // ----------------- Learning Paths -----------------
 
 export async function fetchLearningPaths() {

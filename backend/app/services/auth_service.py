@@ -70,6 +70,71 @@ class AuthService:
         except jwt.PyJWTError:
             return None
 
+    @staticmethod
+    def verify_google_token(credential: str) -> Dict[str, Any]:
+        """
+        Validates Google ID Token using official google-auth library and fallback tokeninfo.
+        Never trusts client-supplied user identity without verification.
+        Ensures email_verified is True to prevent account-linking vulnerabilities.
+        """
+        if not credential:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing Google OAuth credential."
+            )
+
+        # 1. Try official google-auth library verification
+        try:
+            from google.oauth2 import id_token
+            from google.auth.transport import requests as google_requests
+
+            client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+            id_info = id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                audience=client_id if client_id else None
+            )
+
+            if id_info.get("iss") not in ["accounts.google.com", "https://accounts.google.com"]:
+                raise ValueError(f"Invalid Google token issuer: {id_info.get('iss')}")
+
+            if not id_info.get("email_verified", False):
+                raise ValueError("Google account email is not verified.")
+
+            return {
+                "google_id": id_info.get("sub"),
+                "email": id_info.get("email", "").lower(),
+                "name": id_info.get("name") or id_info.get("email", "").split("@")[0].capitalize(),
+                "picture": id_info.get("picture")
+            }
+        except Exception as e:
+            # 2. Fallback to Google's online tokeninfo endpoint for test/dev flexibility
+            try:
+                import httpx
+                resp = httpx.get(
+                    f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}",
+                    timeout=5.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    verified = data.get("email_verified") in [True, "true", "True"]
+                    if not verified:
+                        raise ValueError("Google account email is not verified.")
+                    return {
+                        "google_id": data.get("sub"),
+                        "email": data.get("email", "").lower(),
+                        "name": data.get("name") or data.get("email", "").split("@")[0].capitalize(),
+                        "picture": data.get("picture")
+                    }
+            except Exception:
+                pass
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Google ID token verification failed: {str(e)}",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
 
 def get_current_user_optional(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security),

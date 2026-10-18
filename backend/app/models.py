@@ -14,8 +14,11 @@ class User(Base):
 
     id = Column(String(64), primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)
     full_name = Column(String(255), nullable=False, default="")
+    avatar_url = Column(String(512), nullable=True)
+    google_id = Column(String(128), unique=True, nullable=True, index=True)
+    auth_provider = Column(String(32), default="email")  # "email", "google"
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

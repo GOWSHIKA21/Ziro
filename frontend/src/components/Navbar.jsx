@@ -75,7 +75,16 @@ export default function Navbar({
             {currentUser ? (
               <div className="flex items-center gap-2 pl-1 border-l border-slate-200">
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold">
-                  <User className="w-3.5 h-3.5 text-blue-600" />
+                  {currentUser.avatar_url ? (
+                    <img
+                      src={currentUser.avatar_url}
+                      alt={currentUser.full_name || 'User'}
+                      className="w-4 h-4 rounded-full object-cover border border-slate-300"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <User className="w-3.5 h-3.5 text-blue-600" />
+                  )}
                   <span className="max-w-[100px] truncate">{currentUser.full_name || currentUser.email}</span>
                 </div>
                 <button

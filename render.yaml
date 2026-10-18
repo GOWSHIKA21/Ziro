@@ -16,3 +16,8 @@ services:
         value: deterministic
       - key: CORS_ORIGINS
         value: "*"
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+

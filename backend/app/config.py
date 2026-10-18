@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "ziro-free-learning-path-builder-jwt-secret-key-2026"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
+    # Google OAuth 2.0 / OpenID Connect
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
+    GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = None
     
     # LLM Settings
     GEMINI_API_KEY: Optional[str] = None

@@ -222,3 +222,168 @@ def test_adaptive_recovery_replanning(client: TestClient):
     rev = adapted_path["adaptive_revisions"][0]
     assert rev["revision_type"] == "rebalance"
     assert "Adaptive Recovery applied" in rev["reasoning"]
+
+
+def test_google_oauth_config_endpoint(client: TestClient):
+    """Verifies /api/auth/google/config returns public configuration safely."""
+    res = client.get("/api/auth/google/config")
+    assert res.status_code == 200
+    data = res.json()
+    assert "client_id" in data
+    assert "is_configured" in data
+    assert isinstance(data["is_configured"], bool)
+    # Ensure client secret is NEVER present
+    assert "client_secret" not in data
+    assert "secret" not in data
+
+
+def test_google_oauth_first_time_signup_and_protected_access(client: TestClient, monkeypatch):
+    """
+    Verifies that a first-time Google user is automatically provisioned,
+    receives a valid JWT, can access protected endpoints, and create user-specific learning paths.
+    """
+    from app.services.auth_service import AuthService
+
+    # Mock Google ID token verification
+    mock_profile = {
+        "google_id": "google_10987654321",
+        "email": "sarah.connor@gmail.com",
+        "name": "Sarah Connor",
+        "picture": "https://lh3.googleusercontent.com/a/mock-sarah"
+    }
+    monkeypatch.setattr(AuthService, "verify_google_token", lambda token: mock_profile)
+
+    # First-time Google Sign-Up
+    res = client.post("/api/auth/google", json={"credential": "mock_google_id_token_sarah"})
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["user"]["email"] == "sarah.connor@gmail.com"
+    assert data["user"]["full_name"] == "Sarah Connor"
+    assert data["user"]["auth_provider"] == "google"
+    assert data["user"]["google_id"] == "google_10987654321"
+    assert data["user"]["avatar_url"] == "https://lh3.googleusercontent.com/a/mock-sarah"
+
+    token = data["access_token"]
+    user_id = data["user"]["id"]
+
+    # Verify protected /api/auth/me
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["id"] == user_id
+
+    # Verify creating a user-specific learning path
+    path_res = client.post(
+        "/api/learning-paths",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "goal": "Cybersecurity Analyst",
+            "starting_level": "Beginner",
+            "weekly_hours": 6.0,
+            "duration_value": 3,
+            "duration_unit": "months"
+        }
+    )
+    assert path_res.status_code == 201
+    assert path_res.json()["user_id"] == user_id
+
+
+
+def test_google_oauth_returning_user_signin(client: TestClient, monkeypatch):
+    """
+    Verifies that returning Google users sign in seamlessly into their existing account.
+    """
+    from app.services.auth_service import AuthService
+
+    mock_profile = {
+        "google_id": "google_returning_999",
+        "email": "returning.user@gmail.com",
+        "name": "Returning User",
+        "picture": "https://lh3.googleusercontent.com/a/mock-returning"
+    }
+    monkeypatch.setattr(AuthService, "verify_google_token", lambda token: mock_profile)
+
+    # 1. Sign up first time
+    res1 = client.post("/api/auth/google", json={"credential": "token_1"})
+    assert res1.status_code == 200
+    first_user_id = res1.json()["user"]["id"]
+
+    # 2. Sign in returning user
+    res2 = client.post("/api/auth/google", json={"credential": "token_2"})
+    assert res2.status_code == 200
+    assert res2.json()["user"]["id"] == first_user_id
+    assert res2.json()["user"]["email"] == "returning.user@gmail.com"
+
+
+def test_google_oauth_secure_account_linking(client: TestClient, monkeypatch):
+    """
+    Verifies secure account linking:
+    When an account was created via standard email/password,
+    signing in with a cryptographically verified Google account of the same email
+    safely links the Google ID without creating a duplicate account.
+    """
+    from app.services.auth_service import AuthService
+
+    # 1. Register with email/password
+    reg = client.post(
+        "/api/auth/register",
+        json={
+            "email": "linkable.student@gmail.com",
+            "password": "PasswordStudent123!",
+            "full_name": "Linkable Student"
+        }
+    )
+    assert reg.status_code == 201
+    orig_user_id = reg.json()["user"]["id"]
+
+    # 2. Later sign in with Google for that same verified email
+    mock_google = {
+        "google_id": "google_linked_sub_456",
+        "email": "linkable.student@gmail.com",
+        "name": "Linkable Student Google",
+        "picture": "https://lh3.googleusercontent.com/a/mock-linked"
+    }
+    monkeypatch.setattr(AuthService, "verify_google_token", lambda token: mock_google)
+
+    oauth_res = client.post("/api/auth/google", json={"credential": "token_link"})
+    assert oauth_res.status_code == 200
+    linked_data = oauth_res.json()
+    assert linked_data["user"]["id"] == orig_user_id
+    assert linked_data["user"]["google_id"] == "google_linked_sub_456"
+    assert linked_data["user"]["avatar_url"] == "https://lh3.googleusercontent.com/a/mock-linked"
+
+    # 3. User can still sign in with original password as well
+    pw_res = client.post(
+        "/api/auth/login",
+        json={"email": "linkable.student@gmail.com", "password": "PasswordStudent123!"}
+    )
+    assert pw_res.status_code == 200
+    assert pw_res.json()["user"]["id"] == orig_user_id
+
+
+def test_google_oauth_invalid_token_rejection(client: TestClient):
+    """Verifies that an invalid/forged Google token is rejected with 401 Unauthorized."""
+    res = client.post("/api/auth/google", json={"credential": "completely_fake_invalid_token"})
+    assert res.status_code == 401
+    assert "verification failed" in res.json()["detail"].lower()
+
+
+def test_google_oauth_unverified_email_fails():
+    """Verifies that Google accounts with email_verified == False are rejected."""
+    from fastapi import HTTPException
+    from app.services.auth_service import AuthService
+    from unittest.mock import patch
+
+    with patch("google.oauth2.id_token.verify_oauth2_token") as mock_verify:
+        mock_verify.return_value = {
+            "iss": "https://accounts.google.com",
+            "sub": "unverified_sub",
+            "email": "unverified@example.com",
+            "email_verified": False
+        }
+        with pytest.raises(HTTPException) as exc:
+            AuthService.verify_google_token("dummy_token")
+        assert exc.value.status_code == 401
+        assert "not verified" in exc.value.detail.lower()
+
+

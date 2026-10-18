@@ -87,11 +87,37 @@ railway up
 
 ---
 
+## 🔑 Google OAuth 2.0 / OpenID Connect Setup
+
+To enable "Continue with Google" in production and local development:
+
+1. **Create Google Cloud Credentials**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/) -> **APIs & Services** -> **Credentials**.
+   - Click **Create Credentials** -> **OAuth client ID**.
+   - Application type: **Web application**.
+2. **Authorized JavaScript Origins**:
+   - `http://localhost:5173`
+   - `http://localhost:8000`
+   - `https://free-learning-path-builder.onrender.com` (or your custom domain)
+3. **Environment Variables**:
+   Add to Render Dashboard (Environment) or your `.env`:
+   ```bash
+   GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+   ```
+   *Note: `GOOGLE_OAUTH_CLIENT_SECRET` is kept strictly server-side and never exposed to the frontend.*
+4. **Offline / Unconfigured Mode**:
+   If no Google Client ID is configured, the application displays an interactive setup drawer guiding the user, while standard email/password authentication remains 100% functional.
+
+---
+
 ## 🔒 Verification & Health Check Checklist
 
 After deployment finishes, test these endpoints:
 1. **API Health**: `https://<YOUR-APP-URL>/api/health`
    - Expected response: `{"status":"healthy","service":"Free Learning Path Builder API",...}`
 2. **Interactive API Docs**: `https://<YOUR-APP-URL>/docs`
-3. **Frontend UI**: `https://<YOUR-APP-URL>`
-4. **Official Test Lab**: Navigate to the **🧪 Test Lab** tab in the UI and click **Run TC1–TC4** to verify live in the cloud.
+3. **Google OAuth Config**: `https://<YOUR-APP-URL>/api/auth/google/config`
+4. **Frontend UI**: `https://<YOUR-APP-URL>`
+5. **Official Test Lab**: Navigate to the **🧪 Test Lab** tab in the UI and click **Run TC1–TC4** to verify live in the cloud.
+

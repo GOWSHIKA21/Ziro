@@ -36,6 +36,9 @@ class UserResponse(BaseModel):
     id: str
     email: str
     full_name: str
+    avatar_url: Optional[str] = None
+    google_id: Optional[str] = None
+    auth_provider: str = "email"
     is_active: bool
     created_at: datetime.datetime
 
@@ -47,6 +50,15 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., description="Google ID Token issued by Google Identity Services")
+
+
+class GoogleConfigResponse(BaseModel):
+    client_id: Optional[str] = None
+    is_configured: bool = False
 
 
 # ----------------- Request Schemas -----------------
