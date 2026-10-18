@@ -86,6 +86,7 @@ class LearningRequestCreate(BaseModel):
     duration_value: int = Field(..., gt=0, le=104, description="Duration quantity")
     duration_unit: str = Field(default="months", description="'weeks' or 'months'")
     preferred_format: Optional[str] = Field(default="Mixed", description="Videos, Interactive courses, Documentation, or Mixed")
+    guest_session_id: Optional[str] = Field(default=None, description="Ephemeral guest session token for anonymous visitors")
 
     @field_validator("goal")
     def validate_goal(cls, v):
@@ -226,6 +227,9 @@ class WeeklyPlanSchema(BaseModel):
     module_id: Optional[str]
     exercises: List[str]
     milestone_assessment: Optional[str]
+    prerequisite_rationale: Optional[str] = None
+    available_weekly_hours: Optional[float] = None
+    remaining_capacity: Optional[float] = None
     status: str
     study_sessions: List[StudySessionSchema] = []
 
@@ -315,6 +319,7 @@ class AdaptivePlanResponse(BaseModel):
 class LearningRequestResponse(BaseModel):
     id: str
     user_id: Optional[str] = None
+    is_benchmark: bool = False
     goal: str
     starting_level: str
     weekly_hours: float
@@ -325,6 +330,9 @@ class LearningRequestResponse(BaseModel):
     status: str
     feasibility_status: str
     feasibility_notes: Optional[str]
+    overall_utilization_percent: Optional[float] = None
+    remaining_capacity_hours: Optional[float] = None
+    estimated_completion_week: Optional[int] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
     modules: List[LearningModuleSchema] = []

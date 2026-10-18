@@ -183,11 +183,22 @@ class ResourceVerifier:
                     
                     found_pricing = [kw for kw in self.pricing_keywords if kw in text_lower]
                     
-                    # If page contains explicit paywall phrases
-                    if any(term in text_lower for term in ["enroll for $", "upgrade to certificate for $", "start 7-day free trial then $"]):
+                    # Explicit paywall phrases
+                    explicit_paywall_terms = [
+                        "enroll for $", "upgrade to certificate for $", "start 7-day free trial then $",
+                        "$39/mo", "$49/mo", "per month", "billed annually", "buy course", "course price"
+                    ]
+                    if any(term in text_lower for term in explicit_paywall_terms):
                         status = "paid_detected"
-                        evidence = f"Paywall indicators detected on page: {', '.join(found_pricing[:3])}"
+                        evidence = f"Paywall indicators detected on page: {', '.join(found_pricing[:3]) if found_pricing else 'subscription/paywall terms'}"
                         resource.free_status = "paid"
+                        resource.verification_status = "flagged"
+                        resource.verification_notes = evidence
+                    elif found_pricing:
+                        # Ambiguous pricing terms present -> mark uncertain, do not claim verified free
+                        status = "uncertain"
+                        evidence = f"Ambiguous pricing terms detected ({', '.join(found_pricing[:2])}). Free access requires manual confirmation."
+                        resource.free_status = "uncertain"
                         resource.verification_status = "flagged"
                         resource.verification_notes = evidence
                     else:

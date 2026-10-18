@@ -19,7 +19,11 @@ from ..schemas import (
 from ..services.agent_orchestrator import agent_orchestrator
 from ..services.verifier import verifier
 from ..services.calendar_service import calendar_service
-from ..services.auth_service import get_current_user_optional
+from ..services.auth_service import (
+    get_current_user_optional,
+    get_guest_session_id_optional,
+    verify_learning_path_access
+)
 
 router = APIRouter(prefix="/api/learning-paths", tags=["Learning Paths"])
 
@@ -27,6 +31,7 @@ router = APIRouter(prefix="/api/learning-paths", tags=["Learning Paths"])
 async def create_learning_path(
     payload: LearningRequestCreate,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -52,9 +57,14 @@ async def create_learning_path(
     # Assign stable unique ID
     req_id = f"lp_{uuid.uuid4().hex[:10]}"
 
+    assigned_guest_id = None
+    if not current_user:
+        assigned_guest_id = payload.guest_session_id or guest_session_id
+
     learning_request = LearningRequest(
         id=req_id,
         user_id=current_user.id if current_user else None,
+        guest_session_id=assigned_guest_id,
         goal=payload.goal.strip(),
         starting_level=payload.starting_level,
         weekly_hours=float(payload.weekly_hours),
@@ -79,20 +89,31 @@ async def create_learning_path(
 @router.get("", response_model=List[LearningRequestResponse])
 def list_learning_paths(
     current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
-    """Retrieve learning paths, isolating to current user if authenticated or showing all if guest/demo."""
+    """
+    Retrieve saved learning paths:
+    - Authenticated user: returns paths where user_id == current_user.id
+    - Guest with session header: returns paths where guest_session_id == guest_session_id (only their own paths)
+    - Visitor with no session: returns empty list []
+    """
     if current_user:
         return db.query(LearningRequest).filter(
-            (LearningRequest.user_id == current_user.id) | (LearningRequest.user_id == None)
+            LearningRequest.user_id == current_user.id
         ).order_by(LearningRequest.created_at.desc()).all()
-    return db.query(LearningRequest).order_by(LearningRequest.created_at.desc()).all()
+    if guest_session_id:
+        return db.query(LearningRequest).filter(
+            LearningRequest.guest_session_id == guest_session_id
+        ).order_by(LearningRequest.created_at.desc()).all()
+    return []
 
 
 @router.get("/{id}", response_model=LearningRequestResponse)
 def get_learning_path(
     id: str,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """Retrieve current state of a specific learning path with security isolation."""
@@ -100,9 +121,7 @@ def get_learning_path(
     if not req:
         raise HTTPException(status_code=404, detail=f"Learning path with ID '{id}' not found.")
     
-    # User isolation check
-    if req.user_id and current_user and req.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this learning path.")
+    verify_learning_path_access(req, current_user, guest_session_id)
     return req
 
 
@@ -111,6 +130,8 @@ async def generate_learning_plan(
     id: str,
     simulate_paid: Optional[str] = Query(None, description="Resource ID or 'ANY' to simulate course paywall"),
     simulate_broken: Optional[str] = Query(None, description="Resource ID or 'ANY' to simulate broken link"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -120,6 +141,8 @@ async def generate_learning_plan(
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail=f"Learning path with ID '{id}' not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
 
     await agent_orchestrator.run_full_pipeline(
         db,
@@ -132,11 +155,17 @@ async def generate_learning_plan(
 
 
 @router.get("/{id}/resources", response_model=List[ResourceSchema])
-def get_resources(id: str, db: Session = Depends(get_db)):
+def get_resources(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
+    db: Session = Depends(get_db)
+):
     """List resources and verification evidence for a learning path."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+    verify_learning_path_access(req, current_user, guest_session_id)
     return req.resources
 
 
@@ -145,6 +174,8 @@ async def verify_resources(
     id: str,
     simulate_paid_resource_id: Optional[str] = None,
     simulate_broken_resource_id: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -154,6 +185,8 @@ async def verify_resources(
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
 
     results = await verifier.verify_all_resources(
         db,
@@ -169,12 +202,16 @@ async def replace_resource_endpoint(
     id: str,
     resource_id: str,
     reason: str = "User requested replacement",
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """Manually or programmatically trigger replacement of a resource."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
 
     target_res = db.query(Resource).filter(
         Resource.id == resource_id,
@@ -196,16 +233,27 @@ async def replace_resource_endpoint(
 
 
 @router.get("/{id}/actions", response_model=List[ProposedActionSchema])
-def get_actions(id: str, db: Session = Depends(get_db)):
+def get_actions(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
+    db: Session = Depends(get_db)
+):
     """View proposed and executed actions for human approval."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+    verify_learning_path_access(req, current_user, guest_session_id)
     return req.proposed_actions
 
 
 @router.post("/{id}/sync-calendar")
-def sync_calendar_endpoint(id: str, db: Session = Depends(get_db)):
+def sync_calendar_endpoint(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
+    db: Session = Depends(get_db)
+):
     """
     Synchronize approved study sessions to calendar.
     Strict invariant: Adds ONLY missing sessions, skips duplicates, preserves user events.
@@ -214,16 +262,25 @@ def sync_calendar_endpoint(id: str, db: Session = Depends(get_db)):
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
 
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
+
     sync_result = calendar_service.sync_calendar(db, req)
     return sync_result
 
 
 @router.get("/{id}/export-markdown")
-def export_markdown_endpoint(id: str, db: Session = Depends(get_db)):
+def export_markdown_endpoint(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
+    db: Session = Depends(get_db)
+):
     """Export complete learning roadmap and verified resources as clean Markdown document."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id)
 
     lines = [
         f"# {req.goal} — Learning Roadmap",
@@ -273,6 +330,7 @@ async def adapt_learning_plan(
     id: str,
     payload: AdaptivePlanRequest,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -284,8 +342,7 @@ async def adapt_learning_plan(
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
 
-    if req.user_id and current_user and req.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this learning path.")
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
 
     # 1. Inspect completion status
     completed_sessions = [s for s in req.study_sessions if s.status == "completed" or (s.actual_minutes_studied and s.actual_minutes_studied > 0)]
@@ -355,14 +412,14 @@ async def adapt_learning_plan(
 def delete_learning_path(
     id: str,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
-    """Delete a learning path with user authorization check."""
+    """Delete a learning path with user and guest session authorization check."""
     req = db.query(LearningRequest).filter(LearningRequest.id == id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
-    if req.user_id and current_user and req.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this learning path.")
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True, is_delete=True)
     db.delete(req)
     db.commit()
     return {"message": f"Learning path {id} deleted successfully."}

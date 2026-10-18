@@ -5,7 +5,7 @@ import {
   Check, LogOut, Link2
 } from 'lucide-react';
 import {
-  getCalendarIcsDownloadUrl,
+  downloadCalendarIcs,
   getCalendarOAuthStatus,
   getCalendarAuthorizeUrl,
   disconnectGoogleCalendar,
@@ -180,15 +180,14 @@ export default function CalendarTab({
         <div className="flex flex-wrap items-center gap-2">
           {/* Universal iCal export */}
           {study_sessions.length > 0 && (
-            <a
-              href={getCalendarIcsDownloadUrl(pathId)}
-              download={`study_schedule_${pathId}.ics`}
+            <button
+              onClick={() => downloadCalendarIcs(pathId)}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors shadow-2xs"
               title="Download standard RFC 5545 iCalendar file for Google Calendar, Apple Calendar, or Outlook"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export iCal (.ics)</span>
-            </a>
+            </button>
           )}
 
           <button

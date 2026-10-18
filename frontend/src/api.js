@@ -2,6 +2,7 @@ const rawBase = import.meta.env.VITE_API_BASE_URL || '';
 const API_BASE = rawBase ? `${rawBase.replace(/\/$/, '')}/api` : '/api';
 
 const TOKEN_KEY = 'ziro_auth_token';
+const GUEST_SESSION_KEY = 'ziro_guest_session_id';
 
 export function getAuthToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -16,11 +17,50 @@ export function clearAuthToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+function generateCryptographicallySecureToken() {
+  try {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+      const bytes = new Uint8Array(24); // 192 bits of entropy
+      window.crypto.getRandomValues(bytes);
+      return 'gst_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {}
+  try {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const bytes = new Uint8Array(24);
+      crypto.getRandomValues(bytes);
+      return 'gst_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {}
+  return 'gst_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 15);
+}
+
+export function getGuestSessionId() {
+  try {
+    let guestId = sessionStorage.getItem(GUEST_SESSION_KEY);
+    if (!guestId) {
+      guestId = generateCryptographicallySecureToken();
+      sessionStorage.setItem(GUEST_SESSION_KEY, guestId);
+    }
+    return guestId;
+  } catch {
+    return 'gst_ephemeral_' + Math.random().toString(36).substring(2, 15);
+  }
+}
+
+export function clearGuestSessionId() {
+  try {
+    sessionStorage.removeItem(GUEST_SESSION_KEY);
+  } catch {}
+}
+
 function getAuthHeaders(customHeaders = {}) {
   const token = getAuthToken();
+  const guestId = !token ? getGuestSessionId() : null;
   return {
     ...customHeaders,
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(guestId ? { 'X-Guest-Session-ID': guestId } : {})
   };
 }
 
@@ -71,6 +111,7 @@ export async function getMe() {
 
 export async function logoutUser() {
   clearAuthToken();
+  clearGuestSessionId();
   await fetch(`${API_BASE}/auth/logout`, { method: 'POST' }).catch(() => {});
   return true;
 }
@@ -114,7 +155,16 @@ export async function getLearningPath(id) {
   const res = await fetch(`${API_BASE}/learning-paths/${id}`, {
     headers: getAuthHeaders()
   });
-  if (!res.ok) throw new Error(`Failed to load learning path: ${id}`);
+  if (res.status === 401) {
+    throw new Error('Authentication required to access this learning path.');
+  }
+  if (res.status === 403) {
+    throw new Error('Access denied: You do not have permission to view this learning path.');
+  }
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || `Failed to load learning path: ${id}`);
+  }
   return res.json();
 }
 
@@ -136,7 +186,16 @@ export async function deleteLearningPath(id) {
     method: 'DELETE',
     headers: getAuthHeaders()
   });
-  if (!res.ok) throw new Error('Failed to delete learning path');
+  if (res.status === 401) {
+    throw new Error('Authentication required to delete this learning path.');
+  }
+  if (res.status === 403) {
+    throw new Error('Access denied: You do not have permission to delete this learning path.');
+  }
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to delete learning path');
+  }
   return res.json();
 }
 
@@ -235,6 +294,44 @@ export async function toggleSessionComplete(sessionId, payload = null) {
   });
   if (!res.ok) throw new Error('Failed to toggle session completion');
   return res.json();
+}
+
+export async function downloadCalendarIcs(pathId) {
+  const res = await fetch(`${API_BASE}/calendar/export-ics?learning_request_id=${pathId}`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to download iCalendar schedule');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `study_schedule_${pathId}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadRoadmapMarkdown(pathId) {
+  const res = await fetch(`${API_BASE}/learning-paths/${pathId}/export-markdown`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to download roadmap Markdown');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `roadmap_${pathId}.md`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export function getCalendarIcsDownloadUrl(pathId) {

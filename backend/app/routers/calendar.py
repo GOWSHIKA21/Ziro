@@ -20,7 +20,10 @@ from ..schemas import (
     StudySessionSchema, StudySessionProgressUpdate,
     GoogleCalendarStatusResponse, GoogleCalendarAuthUrlResponse
 )
-from ..services.auth_service import get_current_user, get_current_user_optional
+from ..services.auth_service import (
+    get_current_user, get_current_user_optional,
+    get_guest_session_id_optional, verify_learning_path_access
+)
 from ..services.google_calendar_service import google_calendar_oauth
 from ..config import settings
 
@@ -61,12 +64,25 @@ def attach_google_url(session: StudySession) -> StudySessionSchema:
 @router.get("/sessions", response_model=List[StudySessionSchema])
 def list_calendar_sessions(
     learning_request_id: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
-    """List all scheduled calendar study sessions with Google Calendar template links."""
+    """List scheduled calendar study sessions with security isolation."""
     query = db.query(StudySession)
     if learning_request_id:
+        req = db.query(LearningRequest).filter(LearningRequest.id == learning_request_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Learning path not found.")
+        verify_learning_path_access(req, current_user, guest_session_id)
         query = query.filter(StudySession.learning_request_id == learning_request_id)
+    elif current_user:
+        query = query.join(LearningRequest).filter(LearningRequest.user_id == current_user.id)
+    elif guest_session_id:
+        query = query.join(LearningRequest).filter(LearningRequest.guest_session_id == guest_session_id)
+    else:
+        return []
+
     sessions = query.order_by(StudySession.scheduled_date.asc(), StudySession.start_time.asc()).all()
     return [attach_google_url(s) for s in sessions]
 
@@ -74,6 +90,8 @@ def list_calendar_sessions(
 @router.get("/export-ics")
 def export_icalendar(
     learning_request_id: str = Query(..., description="ID of the learning path to export"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -83,6 +101,8 @@ def export_icalendar(
     req = db.query(LearningRequest).filter(LearningRequest.id == learning_request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id)
 
     sessions = db.query(StudySession).filter(
         StudySession.learning_request_id == learning_request_id
@@ -136,6 +156,8 @@ def export_icalendar(
 def toggle_session_complete(
     id: str,
     payload: Optional[StudySessionProgressUpdate] = None,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -145,6 +167,9 @@ def toggle_session_complete(
     session = db.query(StudySession).filter(StudySession.id == id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.learning_request:
+        verify_learning_path_access(session.learning_request, current_user, guest_session_id, is_mutation=True)
 
     if payload:
         session.status = "completed" if payload.is_completed else "synced_calendar"
@@ -174,6 +199,8 @@ def toggle_session_complete(
 @router.post("/sessions", response_model=StudySessionSchema, status_code=201)
 def create_user_session(
     payload: UserSessionCreate,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -181,6 +208,12 @@ def create_user_session(
     Marked with is_user_created=True to verify that agent synchronization
     strictly preserves user events without overwriting or deleting them.
     """
+    req = db.query(LearningRequest).filter(LearningRequest.id == payload.learning_request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Learning path not found.")
+
+    verify_learning_path_access(req, current_user, guest_session_id, is_mutation=True)
+
     hash_raw = f"{payload.learning_request_id}:{payload.scheduled_date}:{payload.start_time}:user"
     sess_hash = hashlib.sha256(hash_raw.encode()).hexdigest()[:24]
 
@@ -211,11 +244,20 @@ def create_user_session(
 
 
 @router.delete("/sessions/{id}")
-def delete_session(id: str, db: Session = Depends(get_db)):
+def delete_session(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    guest_session_id: Optional[str] = Depends(get_guest_session_id_optional),
+    db: Session = Depends(get_db)
+):
     """Delete a study session from the calendar."""
     session = db.query(StudySession).filter(StudySession.id == id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    if session.learning_request:
+        verify_learning_path_access(session.learning_request, current_user, guest_session_id, is_mutation=True, is_delete=True)
+
     db.delete(session)
     db.commit()
     return {"deleted": True, "id": id}

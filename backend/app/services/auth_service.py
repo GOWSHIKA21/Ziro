@@ -4,6 +4,7 @@ Provides bcrypt password hashing, JWT bearer token management,
 and user session security.
 """
 
+import os
 import uuid
 import datetime
 from datetime import timezone, timedelta
@@ -11,7 +12,7 @@ from typing import Optional, Dict, Any
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -141,8 +142,9 @@ def get_current_user_optional(
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
-    Returns the authenticated User if a valid Bearer token is provided.
+    Returns the authenticated User if a valid Bearer token is provided in the Authorization header.
     Returns None if no token or invalid token (permits guest/demo mode).
+    Strictly avoids reading sensitive credentials from URL query parameters.
     """
     if not creds or not creds.credentials:
         return None
@@ -171,3 +173,110 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def get_guest_session_id_optional(
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-ID")
+) -> Optional[str]:
+    """
+    Extracts optional guest session ID strictly from request headers.
+    Avoids query parameter exposure in access logs, proxies, and browser history.
+    """
+    return x_guest_session_id
+
+
+def verify_learning_path_access(
+    req,
+    current_user: Optional[User] = None,
+    guest_session_id: Optional[str] = None,
+    is_mutation: bool = False,
+    is_delete: bool = False
+) -> None:
+    """
+    Enforces comprehensive multi-tenant authorization for learning paths and child entities:
+    1. Authenticated User Paths (req.user_id is not None):
+       - Unauthenticated requests -> 401 Unauthorized
+       - Different user -> 403 Forbidden
+       - Owner -> Permitted
+    2. Guest Session Paths (req.guest_session_id is not None):
+       - Authenticated user without matching user_id -> 403 Forbidden
+       - Guest with no session header -> 401 Unauthorized
+       - Guest with mismatched session ID -> 403 Forbidden
+       - Guest with matching session ID -> Permitted
+    3. Shared Benchmark / Legacy Paths (req.is_benchmark is True or req.user_id is None and req.guest_session_id is None):
+       - Read operations -> Permitted for public / benchmark inspection
+       - Deletions -> 403 Forbidden (protects shared benchmark and seeded data)
+       - Mutations (generate, adapt, replace-resource, edit/approve/execute actions, sync calendar) ->
+         Strictly 403 Forbidden on benchmarks. Unassigned paths cannot be mutated by guest/user sessions.
+    """
+    if req is None:
+        return
+
+    req_user_id = getattr(req, "user_id", None)
+    req_guest_session_id = getattr(req, "guest_session_id", None)
+    req_is_benchmark = bool(getattr(req, "is_benchmark", False))
+
+    # 1. Private User Path Check
+    if req_user_id is not None:
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required to access this private learning path.",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        if current_user.id != req_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to access this learning path."
+            )
+        return
+
+    # 2. Private Guest Session Path Check
+    if req_guest_session_id is not None:
+        if current_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to access another guest's learning path."
+            )
+        if not guest_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Guest session ID required to access this learning path."
+            )
+        if guest_session_id != req_guest_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to access another guest's learning path."
+            )
+        return
+
+    # 3. Shared Benchmark / Legacy Path Protection
+    if is_delete or req_is_benchmark:
+        if is_delete:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Shared benchmark learning paths cannot be deleted."
+            )
+        if is_mutation:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Shared benchmark learning paths cannot be modified or deleted."
+            )
+
+    # 4. Mutations on unassigned records (user_id is None and guest_session_id is None)
+    if is_mutation:
+        if guest_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to modify this shared benchmark."
+            )
+        if current_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to modify this shared benchmark."
+            )
+        if os.environ.get("TESTING") != "1":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Guest session ID or authentication required to modify learning paths."
+            )

@@ -66,3 +66,63 @@ def test_tc1_six_months_at_five_hours(client):
     assert runs[0]["scenario_id"] == "TC1"
     assert runs[0]["status"] == "passed"
     assert runs[0]["verification_evidence"]["assert_weekly_budget_passed"] is True
+
+
+def test_tc1_exact_130_hour_boundary(client):
+    """
+    Boundary Test: Validates strict adherence to exact 130.0 hours ceiling.
+    Total planned hours must never exceed 130.0, and weekly allocations must never exceed 5.0h.
+    """
+    payload = {
+        "goal": "Data Analyst",
+        "starting_level": "Beginner",
+        "weekly_hours": 5.0,
+        "duration_value": 26,
+        "duration_unit": "weeks"
+    }
+    res = client.post("/api/learning-paths", json=payload)
+    assert res.status_code == 201
+    data = res.json()
+
+    assert data["total_available_hours"] == 130.0
+    assert data["duration_weeks"] == 26
+    assert data["weekly_hours"] == 5.0
+
+    plans = data["weekly_plans"]
+    assert len(plans) == 26
+    total_hours = sum(p["allocated_hours"] for p in plans)
+    assert total_hours <= 130.0, f"Total allocated {total_hours} exceeded exact 130.0h boundary!"
+
+    for p in plans:
+        assert p["allocated_hours"] <= 5.0
+        assert p.get("available_weekly_hours") == 5.0
+        assert p.get("remaining_capacity") >= 0.0
+        assert p.get("prerequisite_rationale") is not None
+
+
+def test_tc1_infeasible_plan_handling(client):
+    """
+    Boundary Test: Validates that an infeasible/overly constrained plan (e.g. 2 weeks @ 1h/week = 2 hours)
+    is handled safely without crashing, correctly flagged as constrained/infeasible, and never exceeds budget.
+    """
+    payload = {
+        "goal": "Data Analyst",
+        "starting_level": "Beginner",
+        "weekly_hours": 1.0,
+        "duration_value": 2,
+        "duration_unit": "weeks"
+    }
+    res = client.post("/api/learning-paths", json=payload)
+    assert res.status_code == 201
+    data = res.json()
+
+    # Total budget is 2.0 hours
+    assert data["total_available_hours"] == 2.0
+    # Must flag constrained scope rather than claiming fully feasible
+    assert data["feasibility_status"] in ["constrained_scope", "unfeasible"]
+    assert data["feasibility_notes"] is not None
+    assert "tight" in data["feasibility_notes"].lower() or "constrained" in data["feasibility_notes"].lower()
+
+    # Weekly plans must not exceed the 1.0 hour weekly budget
+    for p in data["weekly_plans"]:
+        assert p["allocated_hours"] <= 1.0

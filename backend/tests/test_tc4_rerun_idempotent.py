@@ -75,3 +75,56 @@ def test_tc4_rerun_without_duplicates(client):
     assert runs[0]["scenario_id"] == "TC4"
     assert runs[0]["status"] == "passed"
     assert runs[0]["verification_evidence"]["duplicate_sessions_created"] == 0
+
+
+def test_tc4_partial_failure_resume_without_duplicates(client):
+    """
+    Rerun Test: Simulates an interrupted or partial workflow where only 1 action was approved
+    and executed, then the workflow resumes.
+    Expected: Resuming executes only genuinely missing pieces without duplicating already executed actions or sessions.
+    """
+    payload = {
+        "goal": "Data Analyst",
+        "starting_level": "Beginner",
+        "weekly_hours": 5.0,
+        "duration_value": 4,
+        "duration_unit": "weeks"
+    }
+
+    # Step 1: Initial creation
+    create_res = client.post("/api/learning-paths", json=payload)
+    assert create_res.status_code == 201
+    path_data = create_res.json()
+    path_id = path_data["id"]
+
+    # Step 2: Partially approve only the first calendar action
+    cal_actions = [a for a in path_data["proposed_actions"] if a["action_type"] == "calendar_block"]
+    assert len(cal_actions) >= 1
+    first_action = cal_actions[0]
+
+    appr_res = client.post(f"/api/actions/{first_action['id']}/approve", json={"decision": "approve"})
+    assert appr_res.status_code == 200
+
+    # Snapshot partial state
+    mid_res = client.get(f"/api/learning-paths/{path_id}")
+    mid_data = mid_res.json()
+    initial_sessions = mid_data["study_sessions"]
+    initial_sess_count = len(initial_sessions)
+    assert initial_sess_count > 0
+    initial_ids = {s["id"] for s in initial_sessions}
+
+    # Step 3: Trigger full rerun/resume
+    rerun_res = client.post(f"/api/learning-paths/{path_id}/generate")
+    assert rerun_res.status_code == 200
+
+    sync_res = client.post(f"/api/learning-paths/{path_id}/sync-calendar")
+    assert sync_res.status_code == 200
+
+    # Step 4: Validate that already created sessions were NOT duplicated
+    final_res = client.get(f"/api/learning-paths/{path_id}")
+    final_data = final_res.json()
+    final_sessions = final_data["study_sessions"]
+
+    assert len(final_sessions) == initial_sess_count, "Partial resume duplicated existing sessions!"
+    final_ids = {s["id"] for s in final_sessions}
+    assert initial_ids == final_ids, "Existing session IDs were mutated during partial resume!"

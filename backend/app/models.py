@@ -40,6 +40,8 @@ class LearningRequest(Base):
 
     id = Column(String(64), primary_key=True, index=True)
     user_id = Column(String(64), ForeignKey("users.id"), nullable=True, index=True)
+    guest_session_id = Column(String(64), nullable=True, index=True)
+    is_benchmark = Column(Boolean, default=False, nullable=True)
     goal = Column(String(255), nullable=False)
     starting_level = Column(String(32), default="Beginner")  # Beginner, Intermediate, Advanced
     weekly_hours = Column(Float, nullable=False)
@@ -64,6 +66,22 @@ class LearningRequest(Base):
     study_sessions = relationship("StudySession", back_populates="learning_request", cascade="all, delete-orphan")
     agent_logs = relationship("AgentLog", back_populates="learning_request", cascade="all, delete-orphan", order_by="AgentLog.timestamp")
     adaptive_revisions = relationship("AdaptiveRevision", back_populates="learning_request", cascade="all, delete-orphan", order_by="AdaptiveRevision.timestamp.desc()")
+
+    @property
+    def overall_utilization_percent(self) -> float:
+        if not self.total_available_hours or self.total_available_hours <= 0:
+            return 0.0
+        allocated = sum(p.allocated_hours for p in (self.weekly_plans or []))
+        return round((allocated / self.total_available_hours) * 100, 1)
+
+    @property
+    def remaining_capacity_hours(self) -> float:
+        allocated = sum(p.allocated_hours for p in (self.weekly_plans or []))
+        return round(max(0.0, self.total_available_hours - allocated), 1)
+
+    @property
+    def estimated_completion_week(self) -> int:
+        return self.duration_weeks or len(self.weekly_plans or [])
 
 
 class LearningModule(Base):
@@ -95,11 +113,21 @@ class WeeklyPlan(Base):
     module_id = Column(String(64), ForeignKey("learning_modules.id"), nullable=True)
     exercises = Column(JSON, default=list)
     milestone_assessment = Column(Text, nullable=True)
+    prerequisite_rationale = Column(Text, nullable=True)
     status = Column(String(32), default="planned")  # planned, current, completed
 
     learning_request = relationship("LearningRequest", back_populates="weekly_plans")
     module = relationship("LearningModule", back_populates="weekly_plans")
     study_sessions = relationship("StudySession", back_populates="weekly_plan", cascade="all, delete-orphan")
+
+    @property
+    def available_weekly_hours(self) -> float:
+        return self.learning_request.weekly_hours if self.learning_request else self.allocated_hours
+
+    @property
+    def remaining_capacity(self) -> float:
+        avail = self.available_weekly_hours
+        return round(max(0.0, avail - self.allocated_hours), 1)
 
 
 class Resource(Base):

@@ -3,11 +3,12 @@ import {
   AlertCircle, ArrowRight, Sparkles, RefreshCw, FileText, Check, Download, Zap, GitFork,
   PlusCircle, Play
 } from 'lucide-react';
-import { getRoadmapMarkdownDownloadUrl } from '../api';
+import { downloadRoadmapMarkdown } from '../api';
 
 export default function DashboardTab({
   learningPath,
   learningPaths = [],
+  currentUser,
   onSelectPath,
   onOpenNewModal,
   onQuickStart,
@@ -64,14 +65,14 @@ export default function DashboardTab({
           </div>
         </div>
 
-        {/* Existing Saved Learning Paths (if any exist) */}
-        {learningPaths && learningPaths.length > 0 && (
+        {/* Saved Learning Paths (only shown for signed-in user's paths) */}
+        {currentUser && learningPaths && learningPaths.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-blue-600" />
-                  <span>Resume a Saved Learning Path</span>
+                  <span>Your Saved Learning Paths</span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Click any roadmap to continue your study sessions and track progress
@@ -225,15 +226,14 @@ export default function DashboardTab({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <a
-              href={getRoadmapMarkdownDownloadUrl(learningPath.id)}
-              download={`roadmap_${learningPath.id}.md`}
+            <button
+              onClick={() => downloadRoadmapMarkdown(learningPath.id)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors shadow-2xs"
               title="Download full roadmap as Markdown documentation"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>Export (.md)</span>
-            </a>
+            </button>
 
             <button
               onClick={onOpenAdaptiveModal}

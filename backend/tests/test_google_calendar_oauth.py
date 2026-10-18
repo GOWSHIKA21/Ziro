@@ -275,18 +275,18 @@ def test_calendar_sync_with_connected_google_calendar(client: TestClient, auth_u
 
     # 3. Approve a calendar action block with mocked Google API event insertion
     mock_g_event = {"id": "gcal_event_id_99999", "htmlLink": "https://calendar.google.com/event?eid=99999"}
-    path_details = client.get(f"/api/learning-paths/{path_id}").json()
+    path_details = client.get(f"/api/learning-paths/{path_id}", headers=auth_user["headers"]).json()
     actions = path_details.get("proposed_actions", [])
     cal_action = next((a for a in actions if a["action_type"] == "calendar_block"), None)
     assert cal_action is not None
 
     with patch.object(google_calendar_oauth, "insert_calendar_event", return_value=mock_g_event) as mock_insert:
-        appr_res = client.post(f"/api/actions/{cal_action['id']}/approve")
+        appr_res = client.post(f"/api/actions/{cal_action['id']}/approve", headers=auth_user["headers"])
         assert appr_res.status_code == 200
         assert mock_insert.called
 
     # 4. Sync calendar verification reflects live connected mode
-    sync_res = client.post(f"/api/learning-paths/{path_id}/sync-calendar")
+    sync_res = client.post(f"/api/learning-paths/{path_id}/sync-calendar", headers=auth_user["headers"])
     assert sync_res.status_code == 200
     sync_data = sync_res.json()
     assert sync_data["integration_mode"] == "Google Calendar API (Live Connected)"

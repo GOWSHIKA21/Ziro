@@ -56,6 +56,34 @@ def ensure_schema_migrations():
                 for col_name, col_type in cols_to_add:
                     if col_name not in existing_cols:
                         conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+
+                # Check weekly_plans table columns
+                res_wp = conn.execute(text("PRAGMA table_info(weekly_plans)")).fetchall()
+                existing_wp_cols = {row[1] for row in res_wp}
+                if "prerequisite_rationale" not in existing_wp_cols:
+                    conn.execute(text("ALTER TABLE weekly_plans ADD COLUMN prerequisite_rationale TEXT"))
+
+                # Check learning_requests table columns
+                res_lr = conn.execute(text("PRAGMA table_info(learning_requests)")).fetchall()
+                existing_lr_cols = {row[1] for row in res_lr}
+                lr_cols_to_add = [
+                    ("user_id", "VARCHAR(36)"),
+                    ("guest_session_id", "VARCHAR(64)"),
+                    ("is_benchmark", "BOOLEAN DEFAULT 0")
+                ]
+                for col_name, col_type in lr_cols_to_add:
+                    if col_name not in existing_lr_cols:
+                        conn.execute(text(f"ALTER TABLE learning_requests ADD COLUMN {col_name} {col_type}"))
+
+                # Mark legacy unowned records as shared benchmarks to protect them from mutation
+                conn.execute(text("UPDATE learning_requests SET is_benchmark = 1 WHERE user_id IS NULL AND guest_session_id IS NULL AND (is_benchmark IS NULL OR is_benchmark = 0)"))
+                conn.commit()
+            else:
+                conn.execute(text("ALTER TABLE weekly_plans ADD COLUMN IF NOT EXISTS prerequisite_rationale TEXT"))
+                conn.execute(text("ALTER TABLE learning_requests ADD COLUMN IF NOT EXISTS user_id VARCHAR(36)"))
+                conn.execute(text("ALTER TABLE learning_requests ADD COLUMN IF NOT EXISTS guest_session_id VARCHAR(64)"))
+                conn.execute(text("ALTER TABLE learning_requests ADD COLUMN IF NOT EXISTS is_benchmark BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("UPDATE learning_requests SET is_benchmark = TRUE WHERE user_id IS NULL AND guest_session_id IS NULL AND (is_benchmark IS NULL OR is_benchmark = FALSE)"))
                 conn.commit()
     except Exception as e:
         # Ignore if tables do not exist yet (create_all will create them)

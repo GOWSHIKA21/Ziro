@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   FlaskConical, CheckCircle2, XCircle, Play, RefreshCw,
-  Clock, ShieldCheck, ChevronDown, ChevronRight, Terminal, Layers
+  Clock, ShieldCheck, ChevronDown, ChevronRight, Terminal, Layers, Download
 } from 'lucide-react';
 
 export default function TestLabTab({
@@ -39,6 +39,62 @@ export default function TestLabTab({
     onExecuteTests(scenarioId);
   };
 
+  const handleExportJson = () => {
+    const passedCount = OFFICIAL_SCENARIOS.filter(scen => {
+      const runs = testRuns.filter(r => r.scenario_id === scen.id);
+      return runs[0]?.status === 'passed';
+    }).length;
+
+    const reportData = {
+      title: "Agentic AI Hackathon 2026 - Test Evidence & Audit Report",
+      exported_at: new Date().toISOString(),
+      platform: "Free Learning Path Builder",
+      environment: {
+        frontend_url: window.location.origin,
+        user_agent: navigator.userAgent,
+        guest_session_isolation: true
+      },
+      summary: {
+        total_scenarios: OFFICIAL_SCENARIOS.length,
+        passed_scenarios: passedCount,
+        all_passed: passedCount === OFFICIAL_SCENARIOS.length,
+        total_runs_recorded: testRuns.length
+      },
+      scenarios: OFFICIAL_SCENARIOS.map(scen => {
+        const runs = testRuns.filter(r => r.scenario_id === scen.id);
+        const latest = runs[0] || null;
+        return {
+          scenario_id: scen.id,
+          title: scen.title,
+          description: scen.description,
+          status: latest ? latest.status : "not_run",
+          execution_mode: latest ? (latest.evidence_summary?.mode || "deterministic_backend_runner") : "not_executed",
+          execution_timestamp: latest ? (latest.created_at || latest.timestamp || new Date().toISOString()) : null,
+          execution_duration_ms: latest ? latest.execution_duration_ms : null,
+          runs_count: runs.length,
+          latest_run_evidence: latest ? {
+            id: latest.id,
+            status: latest.status,
+            logs_count: latest.logs ? latest.logs.length : 0,
+            evidence_summary: latest.evidence_summary || {},
+            logs: latest.logs || []
+          } : null
+        };
+      }),
+      raw_runs: testRuns
+    };
+
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ziro_hackathon_test_evidence_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const toggleExpand = (id) => {
     setExpandedRunId(expandedRunId === id ? null : id);
   };
@@ -64,19 +120,32 @@ export default function TestLabTab({
           </p>
         </div>
 
-        {/* Run All Button */}
-        <button
-          onClick={() => handleRun('ALL')}
-          disabled={isExecuting}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors shrink-0 disabled:opacity-50"
-        >
-          {isExecuting ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-          ) : (
-            <Play className="w-4 h-4 fill-white" />
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          {testRuns && testRuns.length > 0 && (
+            <button
+              onClick={handleExportJson}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors shrink-0 border border-slate-200"
+              title="Download raw JSON evidence report for hackathon judges"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-600" />
+              <span>Export Evidence (JSON)</span>
+            </button>
           )}
-          <span>Run All 4 Scenarios</span>
-        </button>
+
+          <button
+            onClick={() => handleRun('ALL')}
+            disabled={isExecuting}
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors shrink-0 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+            ) : (
+              <Play className="w-4 h-4 fill-white" />
+            )}
+            <span>Run All 4 Scenarios</span>
+          </button>
+        </div>
       </div>
 
       {/* Scenario Overview Cards Grid */}

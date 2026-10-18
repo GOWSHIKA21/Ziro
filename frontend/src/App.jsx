@@ -99,13 +99,14 @@ export default function App() {
       }
 
       if (resolution.activeId) {
-        setActivePathId(resolution.activeId);
         try {
           const fullPath = await getLearningPath(resolution.activeId);
+          setActivePathId(resolution.activeId);
           setActivePath(fullPath);
         } catch {
-          const fallback = paths.find((p) => p.id === resolution.activeId);
-          setActivePath(fallback || null);
+          clearSavedActivePathId();
+          setActivePathId(null);
+          setActivePath(null);
         }
       } else {
         setActivePathId(null);
@@ -131,7 +132,10 @@ export default function App() {
       setActivePath(pathData);
     } catch (err) {
       console.error(err);
-      showToast('Failed to load learning path details', 'error');
+      setActivePathId(null);
+      setActivePath(null);
+      clearSavedActivePathId();
+      showToast(err.message || 'Failed to load learning path details', 'error');
     }
   };
 
@@ -431,6 +435,7 @@ export default function App() {
           <DashboardTab
             learningPath={activePath}
             learningPaths={learningPaths}
+            currentUser={currentUser}
             onSelectPath={selectPath}
             onOpenNewModal={() => setIsModalOpen(true)}
             onQuickStart={handleQuickStart}

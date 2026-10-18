@@ -75,6 +75,13 @@ class Planner:
             else:
                 milestone = focus_info.get("milestone_assessment", f"Week {w} Skills Check: Complete practice problem set.")
 
+            # Prerequisite explanation
+            prereqs = matched_module.prerequisites if matched_module and matched_module.prerequisites else []
+            if prereqs:
+                rationale = f"Scheduled for Week {w} following completion of foundational prerequisites: {', '.join(str(p) for p in prereqs)}."
+            else:
+                rationale = f"Scheduled for Week {w} as a foundational core competency without prior prerequisites."
+
             weekly_plan = WeeklyPlan(
                 id=plan_id,
                 learning_request_id=learning_request.id,
@@ -84,6 +91,7 @@ class Planner:
                 module_id=matched_module.id if matched_module else None,
                 exercises=exercises,
                 milestone_assessment=milestone,
+                prerequisite_rationale=rationale,
                 status="planned"
             )
             db.add(weekly_plan)

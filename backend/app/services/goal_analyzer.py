@@ -33,7 +33,8 @@ class GoalAnalyzer:
         learning_request.feasibility_status = feasibility.get("status", "feasible")
         learning_request.feasibility_notes = feasibility.get("notes", "")
 
-        modules_data = curriculum.get("modules", [])
+        raw_modules_data = curriculum.get("modules", [])
+        modules_data = self.detect_cycles_and_toposort(raw_modules_data)
         created_modules: List[LearningModule] = []
 
         # Remove any pre-existing modules for idempotency
@@ -78,5 +79,48 @@ class GoalAnalyzer:
         db.commit()
 
         return created_modules, curriculum
+
+    @staticmethod
+    def detect_cycles_and_toposort(modules_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Validates prerequisite relationships, detects cycles in the dependency graph,
+        and returns a topologically sorted list of modules ensuring foundational
+        milestones precede dependent specializations.
+        """
+        if not modules_data:
+            return []
+
+        title_to_index = {m.get("title", "").lower(): i for i, m in enumerate(modules_data)}
+        adj: Dict[int, List[int]] = {i: [] for i in range(len(modules_data))}
+        in_degree = {i: 0 for i in range(len(modules_data))}
+
+        for i, mod in enumerate(modules_data):
+            for prereq in mod.get("prerequisites", []):
+                prereq_lower = str(prereq).lower()
+                for t, idx in title_to_index.items():
+                    if prereq_lower in t or t in prereq_lower:
+                        if idx != i:
+                            adj[idx].append(i)
+                            in_degree[i] += 1
+                        break
+
+        queue = [i for i in range(len(modules_data)) if in_degree[i] == 0]
+        sorted_indices: List[int] = []
+
+        while queue:
+            curr = queue.pop(0)
+            sorted_indices.append(curr)
+            for neighbor in adj[curr]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        # If a cycle was detected (not all nodes processed), append remaining nodes safely
+        if len(sorted_indices) < len(modules_data):
+            for i in range(len(modules_data)):
+                if i not in sorted_indices:
+                    sorted_indices.append(i)
+
+        return [modules_data[i] for i in sorted_indices]
 
 goal_analyzer = GoalAnalyzer()
